@@ -21,15 +21,11 @@ const MONTOS = {
 };
 const MESES_CORTOS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 
-// Resultados de los otros dos cálculos (ver "Cómo se usaron agentes")
-const CONSTRUCTOR_SQL = { ventas: 382410636, pedidos: 10998, ticketOnline: 35152.08, ticketOffline: 34228.75 };
-const AUDITOR = { ventas: 382410636, pedidos: 10998, ticketOnline: 35152.08, ticketOffline: 34228.75 };
 
 // ---------------------------------------------------------------------
 // Formatos
 // ---------------------------------------------------------------------
 const fPesos = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 });
-const fPesos2 = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fEntero = new Intl.NumberFormat("es-AR");
 const fPct = new Intl.NumberFormat("es-AR", { style: "percent", minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const fCompacto = new Intl.NumberFormat("es-AR", { notation: "compact", maximumFractionDigits: 1 });
@@ -64,11 +60,9 @@ let PROVINCIAS = [];
 function preparar(ventas, direcciones, provincias) {
   const nombreProv = Object.fromEntries(provincias.map((p) => [p.province_id, p.name]));
   const provDeDireccion = Object.fromEntries(direcciones.map((d) => [d.address_id, nombreProv[d.province_id]]));
-  let inconsistencias = 0;
 
   PEDIDOS = ventas.map((p) => {
     const online = p.store_id === "";
-    if (online !== (p.channel_id === "1")) inconsistencias += 1; // control de calidad
     const total = aCent(p.total_amount);
     return {
       ym: p.order_date.slice(0, 7),
@@ -82,7 +76,6 @@ function preparar(ventas, direcciones, provincias) {
   });
   MESES = [...new Set(PEDIDOS.map((p) => p.ym))].sort();
   PROVINCIAS = [...new Set(PEDIDOS.map((p) => p.prov))].sort((a, b) => a.localeCompare(b, "es"));
-  return inconsistencias;
 }
 
 // ---------------------------------------------------------------------
@@ -489,40 +482,6 @@ function respuestas(r) {
 }
 
 // ---------------------------------------------------------------------
-// Verificación cruzada (siempre con la regla de la consigna y sin filtros)
-// ---------------------------------------------------------------------
-function verificacion(inconsistencias) {
-  const ok = PEDIDOS.filter((p) => REGLA_CONSIGNA.includes(p.estado));
-  const sum = (arr) => arr.reduce((s, p) => s + p.total, 0);
-  const on = ok.filter((p) => p.canal === "online"), off = ok.filter((p) => p.canal === "offline");
-  const js = {
-    ventas: sum(ok) / 100,
-    pedidos: ok.length,
-    ticketOnline: Math.round(sum(on) / on.length) / 100,
-    ticketOffline: Math.round(sum(off) / off.length) / 100,
-  };
-  const filas = [["Ventas", "ventas", (v) => fPesos.format(v)], ["Pedidos válidos", "pedidos", (v) => fEntero.format(v)],
-    ["Ticket online", "ticketOnline", (v) => fPesos2.format(v)], ["Ticket offline", "ticketOffline", (v) => fPesos2.format(v)]];
-  const tbody = document.querySelector("#t-verif tbody");
-  tbody.replaceChildren();
-  let todo = true;
-  for (const [nombre, k, fmt] of filas) {
-    const coincide = Math.abs(js[k] - CONSTRUCTOR_SQL[k]) < 0.01 && Math.abs(js[k] - AUDITOR[k]) < 0.01;
-    todo &&= coincide;
-    const tr = tbody.insertRow();
-    [nombre, fmt(CONSTRUCTOR_SQL[k]), fmt(AUDITOR[k]), `${fmt(js[k])} ${coincide ? "✓" : "✗"}`].forEach((v, i) => {
-      const td = tr.insertCell();
-      td.textContent = v;
-      if (i) td.className = "n";
-      if (i === 3) td.classList.add(coincide ? "ok-v" : "mal-v");
-    });
-  }
-  document.getElementById("nota-verif").textContent =
-    (todo ? "Los tres cálculos, hechos por caminos distintos, dan exactamente lo mismo. " : "Atención: algún cálculo no coincide. ") +
-    `Control de calidad: el canal según store_id coincide con channel_id en todos los pedidos (${fEntero.format(inconsistencias)} diferencias).`;
-}
-
-// ---------------------------------------------------------------------
 // Filtros
 // ---------------------------------------------------------------------
 function marcarSegmentado(id, valor) {
@@ -597,11 +556,10 @@ async function iniciar() {
     };
     const [ventas, direcciones, provincias] = await Promise.all(
       ["sales_order.csv", "address.csv", "province.csv"].map(leer));
-    const inconsistencias = preparar(ventas, direcciones, provincias);
+    preparar(ventas, direcciones, provincias);
     F = estadoInicial();
     armarFiltros();
     render();
-    verificacion(inconsistencias);
     estado.textContent = `Calculado en vivo sobre ${fEntero.format(PEDIDOS.length)} pedidos de data/sales_order.csv`;
     estado.classList.add("ok");
 

@@ -141,21 +141,6 @@
       </article>
     </section>
 
-    <section class="tarjeta agentes" aria-labelledby="t-agentes">
-      <h2 id="t-agentes">Cómo se usaron agentes</h2>
-      <ol>
-        <li><strong>Agente constructor:</strong> leyó la consigna, extrajo las reglas, calculó las respuestas con SQL (DuckDB) sobre los CSV de origen y construyó este tablero.</li>
-        <li><strong>Agente auditor independiente:</strong> recibió solo las tres preguntas, los CSV y la consigna, sin ver el trabajo del constructor. Recalculó con dos métodos (SQL y Python con decimales exactos) y revisó la calidad de los datos. Además detectó que la diferencia de ticket entre canales se explica por el envío.</li>
-        <li><strong>El tablero:</strong> recalcula todo en JavaScript cada vez que se abre. La tabla compara los tres cálculos con la regla de la consigna y sin filtros.</li>
-      </ol>
-      <div class="tabla-scroll">
-        <table id="t-verif">
-          <thead><tr><th>Dato</th><th class="n">Constructor (SQL)</th><th class="n">Auditor</th><th class="n">Tablero (JS)</th></tr></thead>
-          <tbody></tbody>
-        </table>
-      </div>
-      <p class="nota" id="nota-verif"></p>
-    </section>
   </main>
 
   <footer class="wrap pie">

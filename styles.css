@@ -174,8 +174,6 @@ table { width: 100%; border-collapse: collapse; font-size: .88rem; font-variant-
 th, td { padding: 6px 10px; border-bottom: 1px solid var(--grilla); text-align: left; white-space: nowrap; }
 th { font-weight: 600; color: var(--tinta-3); font-size: .8rem; }
 .n { text-align: right; }
-.ok-v { color: var(--online); font-weight: 600; }
-.mal-v { color: #C0392B; font-weight: 600; }
 
 /* Justificación */
 .tres { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 10px; }
@@ -183,11 +181,6 @@ th { font-weight: 600; color: var(--tinta-3); font-size: .8rem; }
 .tres p { margin: 0; font-size: .9rem; color: var(--tinta-2); }
 .reglas { margin: 16px 0 0; padding-top: 12px; border-top: 1px solid var(--grilla); font-size: .85rem; color: var(--tinta-3); }
 
-.agentes { margin-bottom: 16px; }
-.agentes h2 { margin: 0 0 6px; font-size: 1.05rem; }
-.agentes ol { margin: 6px 0 12px; padding-left: 20px; font-size: .92rem; color: var(--tinta-2); }
-.agentes li { margin-bottom: 6px; }
-.nota { font-size: .85rem; color: var(--tinta-3); margin: 8px 0 0; }
 
 .pie { padding: 8px 16px 32px; font-size: .82rem; color: var(--tinta-3); }
 
