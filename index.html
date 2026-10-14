@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EcoBottle AR · Ventas en 3 preguntas</title>
+  <meta name="description" content="Cuánto vendió EcoBottle AR, cuántos pedidos cuentan como venta y cuál fue el ticket promedio online y offline, calculado en el navegador desde los datos de origen.">
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="hero">
+    <div class="wrap">
+      <p class="eyebrow">EcoBottle AR · Ejercicio de GitHub Pages</p>
+      <h1>Ventas en 3 preguntas</h1>
+      <p class="lede">
+        Las respuestas se calculan <strong>en vivo en tu navegador</strong> a partir de
+        <code>sales_order.csv</code>, la foto del sistema de ventas al 30/09/2025.
+        Cada número viene con su justificación.
+      </p>
+      <p id="estado" class="estado">Cargando datos…</p>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="reglas" aria-labelledby="t-reglas">
+      <h2 id="t-reglas">Reglas que se aplican</h2>
+      <p class="fuente">Fuente: README de la consigna, sección "Cómo leer los datos".</p>
+      <ul>
+        <li><strong>Venta válida:</strong> pedido en estado <code>PAID</code> (pagado, sin entregar) o <code>FULFILLED</code> (entregado o comprado en tienda).</li>
+        <li><strong>Monto de la venta:</strong> <code>total_amount</code> = subtotal + IVA (21 %) + costo de envío, en pesos (ARS).</li>
+        <li><strong>Canal:</strong> pedido <em>online</em> si <code>store_id</code> está vacío; <em>offline</em> (tienda) si tiene tienda.</li>
+      </ul>
+    </section>
+
+    <section class="pregunta" aria-labelledby="t-p1">
+      <span class="num">1</span>
+      <h2 id="t-p1">¿Cuánto vendimos?</h2>
+      <p class="respuesta" id="r1">—</p>
+      <div class="justificacion">
+        <h3>Cómo se llega</h3>
+        <p>Se suma <code>total_amount</code> solo de los pedidos que cuentan como venta. La tabla muestra todos los estados: los que no son venta quedan afuera aunque se hayan cargado en el sistema.</p>
+        <div class="tabla-scroll">
+          <table id="tabla-estados">
+            <thead><tr><th>Estado</th><th>¿Es venta?</th><th class="n">Pedidos</th><th class="n">Monto</th></tr></thead>
+            <tbody></tbody>
+            <tfoot></tfoot>
+          </table>
+        </div>
+        <p class="nota" id="nota1"></p>
+      </div>
+    </section>
+
+    <section class="pregunta" aria-labelledby="t-p2">
+      <span class="num">2</span>
+      <h2 id="t-p2">¿Cuántos pedidos contamos como venta?</h2>
+      <p class="respuesta" id="r2">—</p>
+      <div class="justificacion">
+        <h3>Cómo se llega</h3>
+        <p id="texto2"></p>
+        <div class="barra-apilada" id="barra2" role="img" aria-label="Proporción de pedidos que son venta"></div>
+        <ul class="leyenda" id="leyenda2"></ul>
+      </div>
+    </section>
+
+    <section class="pregunta" aria-labelledby="t-p3">
+      <span class="num">3</span>
+      <h2 id="t-p3">¿Cuál fue el ticket promedio, separando offline y online?</h2>
+      <div class="dos" id="r3"></div>
+      <div class="justificacion">
+        <h3>Cómo se llega</h3>
+        <p><strong>Ticket promedio = ventas del canal ÷ pedidos válidos del canal.</strong> Se calcula por separado en cada canal con las mismas reglas de las preguntas 1 y 2.</p>
+        <div class="tabla-scroll">
+          <table id="tabla-canal">
+            <thead><tr><th>Canal</th><th class="n">Pedidos válidos</th><th class="n">Ventas</th><th class="n">Ticket promedio</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p class="nota" id="nota3"></p>
+      </div>
+    </section>
+
+    <section class="agentes" aria-labelledby="t-agentes">
+      <h2 id="t-agentes">Cómo se usaron agentes</h2>
+      <ol>
+        <li><strong>Agente constructor.</strong> Leyó la consigna, extrajo las reglas de negocio, calculó las respuestas con SQL (DuckDB) sobre <code>raw/sales_order.csv</code> y armó este sitio (HTML, CSS y JavaScript).</li>
+        <li><strong>Agente auditor independiente.</strong> Recibió solo las tres preguntas, los CSV de origen y la consigna, sin acceso al trabajo del constructor. Recalculó las respuestas por dos métodos (SQL y Python puro) y revisó la calidad de los datos.</li>
+        <li><strong>Esta página (tercer cálculo).</strong> El JavaScript vuelve a calcular todo desde el CSV cada vez que se abre, así cualquiera puede comprobar los números.</li>
+      </ol>
+      <div class="tabla-scroll">
+        <table id="tabla-verif">
+          <thead><tr><th>Dato</th><th class="n">Constructor (SQL)</th><th class="n">Auditor</th><th class="n">Esta página (JS)</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="nota" id="nota-verif"></p>
+    </section>
+  </main>
+
+  <footer class="wrap pie">
+    <p>Datos: <code>raw/sales_order.csv</code> del repositorio de la cátedra (11.969 pedidos, 01/2024 a 09/2025). Código y cálculo en <code>app.js</code>.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
