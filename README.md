@@ -38,7 +38,7 @@ Los números se calculan **en el navegador** leyendo `data/sales_order.csv`, `da
 |---|---|
 | **Constructor** | Leyó la consigna, extrajo las reglas, calculó las respuestas con SQL (DuckDB) y construyó el sitio. |
 | **Auditor independiente** | Recibió solo las preguntas, los CSV y la consigna, sin ver el trabajo del constructor. Recalculó con dos métodos (SQL y Python puro con `Decimal`) y revisó la calidad de datos: sin `order_id` duplicados, canal (`channel_id`) consistente con `store_id` en los 11.969 pedidos y `total_amount = subtotal + IVA + envío` en todas las filas. |
-| **El tablero** | Tercer cálculo, en JavaScript, sobre los mismos CSV. Muestra la tabla de verificación cruzada (con la regla de la consigna y sin filtros). |
+| **El tablero** | Tercer cálculo, en JavaScript, sobre los mismos CSV. Con la regla de la consigna y sin filtros da los mismos valores que los otros dos. |
 
 Los tres cálculos coinciden al centavo. El auditor además detectó el matiz del envío en la pregunta 3.
 
