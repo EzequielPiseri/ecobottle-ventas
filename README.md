@@ -1,12 +1,19 @@
 # EcoBottle AR · Ventas en 3 preguntas
 
-Sitio estático (HTML, CSS y JavaScript) publicado con GitHub Pages que responde y justifica:
+Tablero interactivo (HTML, CSS y JavaScript, sin librerías) publicado con GitHub Pages que responde y justifica:
 
 1. ¿Cuánto vendimos?
 2. ¿Cuántos pedidos contamos como venta?
 3. ¿Cuál fue el ticket promedio, separando offline y online?
 
-Los números se calculan **en el navegador** cada vez que se abre la página, leyendo `data/sales_order.csv` (copia de `raw/sales_order.csv` del repositorio de la cátedra).
+Los números se calculan **en el navegador** leyendo `data/sales_order.csv`, `data/address.csv` y `data/province.csv` (copias de `raw/` del repositorio de la cátedra) y se recalculan con cada filtro.
+
+## Qué se puede hacer en el tablero
+
+- **Filtrar** por período (todo, 2024, 2025 o un rango de meses), canal, provincia y definición del monto (con o sin IVA y envío). Todas las respuestas, gráficos y justificaciones se recalculan.
+- **Hacer clic en un mes** del gráfico de ventas para filtrar el tablero a ese mes (otro clic lo quita).
+- **Hacer clic en un estado** del gráfico 2 para incluirlo o excluirlo de la venta y ver cuánto cambian las respuestas. El tablero avisa cuando la vista no sigue la regla de la consigna; "Restablecer" vuelve a las respuestas oficiales.
+- **Pasar el mouse** por los gráficos para ver los valores, o abrir la tabla de datos por mes.
 
 ## Respuestas
 
@@ -31,17 +38,17 @@ Los números se calculan **en el navegador** cada vez que se abre la página, le
 |---|---|
 | **Constructor** | Leyó la consigna, extrajo las reglas, calculó las respuestas con SQL (DuckDB) y construyó el sitio. |
 | **Auditor independiente** | Recibió solo las preguntas, los CSV y la consigna, sin ver el trabajo del constructor. Recalculó con dos métodos (SQL y Python puro con `Decimal`) y revisó la calidad de datos: sin `order_id` duplicados, canal (`channel_id`) consistente con `store_id` en los 11.969 pedidos y `total_amount = subtotal + IVA + envío` en todas las filas. |
-| **La página** | Tercer cálculo, en JavaScript, sobre el mismo CSV. Muestra la tabla de verificación cruzada. |
+| **El tablero** | Tercer cálculo, en JavaScript, sobre los mismos CSV. Muestra la tabla de verificación cruzada (con la regla de la consigna y sin filtros). |
 
 Los tres cálculos coinciden al centavo. El auditor además detectó el matiz del envío en la pregunta 3.
 
 ## Estructura
 
 ```
-index.html            estructura y textos
-styles.css            estilos (con modo oscuro y diseño adaptable a celular)
-app.js                lee el CSV, calcula y completa la página
-data/sales_order.csv  datos de origen
+index.html            estructura del tablero
+styles.css            estilos (modo oscuro y diseño adaptable a celular)
+app.js                lee los CSV, aplica filtros, calcula y dibuja los gráficos en SVG
+data/                 sales_order.csv, address.csv y province.csv (datos de origen)
 ```
 
 ## Ver en local

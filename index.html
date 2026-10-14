@@ -3,93 +3,154 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>EcoBottle AR · Ventas en 3 preguntas</title>
-  <meta name="description" content="Cuánto vendió EcoBottle AR, cuántos pedidos cuentan como venta y cuál fue el ticket promedio online y offline, calculado en el navegador desde los datos de origen.">
+  <title>Tablero de ventas EcoBottle</title>
+  <meta name="description" content="Tablero interactivo que responde cuánto vendió EcoBottle AR, cuántos pedidos cuentan como venta y cuál fue el ticket promedio online y offline.">
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <header class="hero">
+  <header class="cabecera">
     <div class="wrap">
-      <p class="eyebrow">EcoBottle AR · Ejercicio de GitHub Pages</p>
+      <p class="eyebrow">EcoBottle AR · Tablero de ventas</p>
       <h1>Ventas en 3 preguntas</h1>
-      <p class="lede">
-        Las respuestas se calculan <strong>en vivo en tu navegador</strong> a partir de
-        <code>sales_order.csv</code>, la foto del sistema de ventas al 30/09/2025.
-        Cada número viene con su justificación.
-      </p>
+      <p class="lede">¿Cuánto vendimos? ¿Cuántos pedidos cuentan como venta? ¿Cuál fue el ticket promedio online y offline? Todo se calcula en tu navegador desde los datos de origen: cambiá los filtros y los números se recalculan.</p>
       <p id="estado" class="estado">Cargando datos…</p>
     </div>
   </header>
 
   <main class="wrap">
-    <section class="reglas" aria-labelledby="t-reglas">
-      <h2 id="t-reglas">Reglas que se aplican</h2>
-      <p class="fuente">Fuente: README de la consigna, sección "Cómo leer los datos".</p>
-      <ul>
-        <li><strong>Venta válida:</strong> pedido en estado <code>PAID</code> (pagado, sin entregar) o <code>FULFILLED</code> (entregado o comprado en tienda).</li>
-        <li><strong>Monto de la venta:</strong> <code>total_amount</code> = subtotal + IVA (21 %) + costo de envío, en pesos (ARS).</li>
-        <li><strong>Canal:</strong> pedido <em>online</em> si <code>store_id</code> está vacío; <em>offline</em> (tienda) si tiene tienda.</li>
-      </ul>
-    </section>
-
-    <section class="pregunta" aria-labelledby="t-p1">
-      <span class="num">1</span>
-      <h2 id="t-p1">¿Cuánto vendimos?</h2>
-      <p class="respuesta" id="r1">—</p>
-      <div class="justificacion">
-        <h3>Cómo se llega</h3>
-        <p>Se suma <code>total_amount</code> solo de los pedidos que cuentan como venta. La tabla muestra todos los estados: los que no son venta quedan afuera aunque se hayan cargado en el sistema.</p>
-        <div class="tabla-scroll">
-          <table id="tabla-estados">
-            <thead><tr><th>Estado</th><th>¿Es venta?</th><th class="n">Pedidos</th><th class="n">Monto</th></tr></thead>
-            <tbody></tbody>
-            <tfoot></tfoot>
-          </table>
+    <!-- Filtros: una sola fila, arriba de todo lo que afectan -->
+    <section class="filtros" aria-label="Filtros">
+      <div class="filtro">
+        <span class="etq-filtro">Período</span>
+        <div class="segmentado" id="f-anio" role="group" aria-label="Año">
+          <button type="button" data-valor="todo" aria-pressed="true">Todo</button>
+          <button type="button" data-valor="2024" aria-pressed="false">2024</button>
+          <button type="button" data-valor="2025" aria-pressed="false">2025</button>
         </div>
-        <p class="nota" id="nota1"></p>
+        <label class="rango">
+          <span class="sr">Desde</span><select id="f-desde" aria-label="Desde"></select>
+        </label>
+        <span class="guion">a</span>
+        <label class="rango">
+          <span class="sr">Hasta</span><select id="f-hasta" aria-label="Hasta"></select>
+        </label>
       </div>
-    </section>
-
-    <section class="pregunta" aria-labelledby="t-p2">
-      <span class="num">2</span>
-      <h2 id="t-p2">¿Cuántos pedidos contamos como venta?</h2>
-      <p class="respuesta" id="r2">—</p>
-      <div class="justificacion">
-        <h3>Cómo se llega</h3>
-        <p id="texto2"></p>
-        <div class="barra-apilada" id="barra2" role="img" aria-label="Proporción de pedidos que son venta"></div>
-        <ul class="leyenda" id="leyenda2"></ul>
-      </div>
-    </section>
-
-    <section class="pregunta" aria-labelledby="t-p3">
-      <span class="num">3</span>
-      <h2 id="t-p3">¿Cuál fue el ticket promedio, separando offline y online?</h2>
-      <div class="dos" id="r3"></div>
-      <div class="justificacion">
-        <h3>Cómo se llega</h3>
-        <p><strong>Ticket promedio = ventas del canal ÷ pedidos válidos del canal.</strong> Se calcula por separado en cada canal con las mismas reglas de las preguntas 1 y 2.</p>
-        <div class="tabla-scroll">
-          <table id="tabla-canal">
-            <thead><tr><th>Canal</th><th class="n">Pedidos válidos</th><th class="n">Ventas</th><th class="n">Ticket promedio</th></tr></thead>
-            <tbody></tbody>
-          </table>
+      <div class="filtro">
+        <span class="etq-filtro">Canal</span>
+        <div class="segmentado" id="f-canal" role="group" aria-label="Canal">
+          <button type="button" data-valor="todos" aria-pressed="true">Todos</button>
+          <button type="button" data-valor="online" aria-pressed="false">Online</button>
+          <button type="button" data-valor="offline" aria-pressed="false">Offline</button>
         </div>
-        <p class="nota" id="nota3"></p>
       </div>
+      <div class="filtro">
+        <label for="f-prov" class="etq-filtro">Provincia</label>
+        <select id="f-prov"><option value="todas">Todas</option></select>
+      </div>
+      <div class="filtro">
+        <label for="f-monto" class="etq-filtro">Monto</label>
+        <select id="f-monto">
+          <option value="total">Con IVA y envío (total_amount)</option>
+          <option value="sinEnvio">Con IVA, sin envío</option>
+          <option value="neto">Sin IVA ni envío (subtotal)</option>
+        </select>
+      </div>
+      <button type="button" id="f-reset" class="boton-sec">Restablecer</button>
     </section>
 
-    <section class="agentes" aria-labelledby="t-agentes">
+    <p id="aviso" class="aviso" hidden></p>
+
+    <!-- Respuestas -->
+    <section class="kpis" aria-label="Respuestas">
+      <article class="kpi kpi-hero">
+        <p class="kpi-preg"><span class="num">1</span>¿Cuánto vendimos?</p>
+        <p class="kpi-valor" id="k-ventas">—</p>
+        <p class="kpi-det" id="k-ventas-det"></p>
+      </article>
+      <article class="kpi">
+        <p class="kpi-preg"><span class="num">2</span>¿Cuántos pedidos cuentan como venta?</p>
+        <p class="kpi-valor" id="k-pedidos">—</p>
+        <p class="kpi-det" id="k-pedidos-det"></p>
+      </article>
+      <article class="kpi kpi-doble">
+        <p class="kpi-preg"><span class="num">3</span>Ticket promedio por canal</p>
+        <div class="tickets">
+          <div class="ticket" id="k-on">
+            <p class="ticket-canal"><i class="clave online"></i>Online</p>
+            <p class="kpi-valor chico" id="k-ticket-on">—</p>
+          </div>
+          <div class="ticket" id="k-off">
+            <p class="ticket-canal"><i class="clave offline"></i>Offline</p>
+            <p class="kpi-valor chico" id="k-ticket-off">—</p>
+          </div>
+        </div>
+        <p class="kpi-det" id="k-ticket-det"></p>
+      </article>
+    </section>
+
+    <section class="grilla">
+      <article class="tarjeta ancha">
+        <header class="tarjeta-cab">
+          <h2><span class="num">1</span>¿Cuánto vendimos cada mes?</h2>
+          <ul class="leyenda" aria-label="Leyenda">
+            <li><i class="clave online"></i>Online</li>
+            <li><i class="clave offline"></i>Offline</li>
+          </ul>
+        </header>
+        <p class="ayuda">Ventas por mes, apiladas por canal. Hacé clic en un mes para filtrar el tablero; otro clic lo quita.</p>
+        <div class="grafico" id="g-meses"></div>
+        <details class="tabla-datos">
+          <summary>Ver los datos en tabla</summary>
+          <div class="tabla-scroll"><table id="t-meses"></table></div>
+        </details>
+      </article>
+
+      <article class="tarjeta">
+        <header class="tarjeta-cab">
+          <h2><span class="num">2</span>¿Qué pedidos cuentan como venta?</h2>
+        </header>
+        <p class="ayuda">Pedidos por estado. La consigna cuenta solo <code>PAID</code> y <code>FULFILLED</code>. Hacé clic en un estado para incluirlo o excluirlo y ver cuánto cambian las respuestas.</p>
+        <div class="grafico" id="g-estados"></div>
+        <ul class="leyenda abajo">
+          <li><i class="clave si"></i>Cuenta como venta</li>
+          <li><i class="clave no"></i>No cuenta</li>
+        </ul>
+      </article>
+
+      <article class="tarjeta">
+        <header class="tarjeta-cab">
+          <h2><span class="num">3</span>Ticket promedio, mes a mes</h2>
+          <ul class="leyenda" aria-label="Leyenda">
+            <li><i class="clave linea online"></i>Online</li>
+            <li><i class="clave linea offline"></i>Offline</li>
+          </ul>
+        </header>
+        <p class="ayuda">Ventas ÷ pedidos válidos de cada canal, por mes. Pasá el mouse para ver los valores.</p>
+        <div class="grafico" id="g-ticket"></div>
+      </article>
+
+      <article class="tarjeta ancha justificacion">
+        <header class="tarjeta-cab"><h2>Cómo se calculan las respuestas</h2></header>
+        <div class="tres">
+          <div><h3><span class="num">1</span>Ventas</h3><p id="j1"></p></div>
+          <div><h3><span class="num">2</span>Pedidos</h3><p id="j2"></p></div>
+          <div><h3><span class="num">3</span>Ticket</h3><p id="j3"></p></div>
+        </div>
+        <p class="reglas"><strong>Reglas de la consigna</strong> (README, "Cómo leer los datos"): es venta un pedido <code>PAID</code> o <code>FULFILLED</code>; <code>total_amount</code> = subtotal + IVA 21 % + envío; un pedido es online si <code>store_id</code> está vacío. La provincia sale de la dirección de envío.</p>
+      </article>
+    </section>
+
+    <section class="tarjeta agentes" aria-labelledby="t-agentes">
       <h2 id="t-agentes">Cómo se usaron agentes</h2>
       <ol>
-        <li><strong>Agente constructor.</strong> Leyó la consigna, extrajo las reglas de negocio, calculó las respuestas con SQL (DuckDB) sobre <code>raw/sales_order.csv</code> y armó este sitio (HTML, CSS y JavaScript).</li>
-        <li><strong>Agente auditor independiente.</strong> Recibió solo las tres preguntas, los CSV de origen y la consigna, sin acceso al trabajo del constructor. Recalculó las respuestas por dos métodos (SQL y Python puro) y revisó la calidad de los datos.</li>
-        <li><strong>Esta página (tercer cálculo).</strong> El JavaScript vuelve a calcular todo desde el CSV cada vez que se abre, así cualquiera puede comprobar los números.</li>
+        <li><strong>Agente constructor:</strong> leyó la consigna, extrajo las reglas, calculó las respuestas con SQL (DuckDB) sobre los CSV de origen y construyó este tablero.</li>
+        <li><strong>Agente auditor independiente:</strong> recibió solo las tres preguntas, los CSV y la consigna, sin ver el trabajo del constructor. Recalculó con dos métodos (SQL y Python con decimales exactos) y revisó la calidad de los datos. Además detectó que la diferencia de ticket entre canales se explica por el envío.</li>
+        <li><strong>El tablero:</strong> recalcula todo en JavaScript cada vez que se abre. La tabla compara los tres cálculos con la regla de la consigna y sin filtros.</li>
       </ol>
       <div class="tabla-scroll">
-        <table id="tabla-verif">
-          <thead><tr><th>Dato</th><th class="n">Constructor (SQL)</th><th class="n">Auditor</th><th class="n">Esta página (JS)</th></tr></thead>
+        <table id="t-verif">
+          <thead><tr><th>Dato</th><th class="n">Constructor (SQL)</th><th class="n">Auditor</th><th class="n">Tablero (JS)</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
@@ -98,9 +159,10 @@
   </main>
 
   <footer class="wrap pie">
-    <p>Datos: <code>raw/sales_order.csv</code> del repositorio de la cátedra (11.969 pedidos, 01/2024 a 09/2025). Código y cálculo en <code>app.js</code>.</p>
+    <p>Datos: <code>sales_order.csv</code>, <code>address.csv</code> y <code>province.csv</code> del repositorio de la cátedra (11.969 pedidos, enero 2024 a septiembre 2025). Cálculo en <code>app.js</code>.</p>
   </footer>
 
+  <div id="tooltip" class="tooltip" role="status" hidden></div>
   <script src="app.js"></script>
 </body>
 </html>
