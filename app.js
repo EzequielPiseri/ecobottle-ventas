@@ -1,26 +1,14 @@
 // Tablero de ventas EcoBottle AR
-// Lee los CSV de origen, aplica las reglas de la consigna y recalcula todo
-// cada vez que cambia un filtro. Sin librerías: SVG y JavaScript puro.
+// Lee el modelo estrella del data warehouse (fact_sales_order + dimensiones)
+// y solo FILTRA por dimensiones y AGREGA medidas. Las transformaciones y la
+// regla de negocio ya están resueltas en el DW (sql/01 y sql/02 del TP).
+// Sin librerías: SVG y JavaScript puro.
 
 // ---------------------------------------------------------------------
-// Reglas y constantes
+// Constantes de presentación
 // ---------------------------------------------------------------------
-const ESTADOS = ["FULFILLED", "PAID", "CANCELLED", "REFUNDED", "CREATED"];
-const DESC = {
-  FULFILLED: "Entregado o comprado en tienda",
-  PAID: "Pagado, sin entregar",
-  CANCELLED: "Cancelado",
-  REFUNDED: "Entregado y reembolsado",
-  CREATED: "Creado, sin pagar",
-};
-const REGLA_CONSIGNA = ["PAID", "FULFILLED"]; // estados que cuentan como venta
-const MONTOS = {
-  total: "total_amount (con IVA y envío)",
-  sinEnvio: "total sin envío (con IVA)",
-  neto: "subtotal (sin IVA ni envío)",
-};
+const ORDEN_ESTADOS = ["FULFILLED", "PAID", "CANCELLED", "REFUNDED", "CREATED"]; // solo el orden visual
 const MESES_CORTOS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
-
 
 // ---------------------------------------------------------------------
 // Formatos
@@ -32,63 +20,81 @@ const fCompacto = new Intl.NumberFormat("es-AR", { notation: "compact", maximumF
 
 const pesos = (cent) => fPesos.format(cent / 100);
 const pesosCompacto = (v) => "$ " + fCompacto.format(v);
-const pesosMillones = (cent) => "$ " + new Intl.NumberFormat("es-AR", { maximumFractionDigits: 1 }).format(cent / 1e8) + " M";
 const etiquetaMes = (ym) => `${MESES_CORTOS[+ym.slice(5, 7) - 1]} ${ym.slice(2, 4)}`;
 const etiquetaMesLarga = (ym) => `${MESES_CORTOS[+ym.slice(5, 7) - 1]} ${ym.slice(0, 4)}`;
 
 // ---------------------------------------------------------------------
-// Datos
+// Lectura de CSV
 // ---------------------------------------------------------------------
-// Los montos se guardan en centavos enteros para que las sumas sean exactas.
+// Los montos se pasan a centavos enteros para que las sumas sean exactas.
 const aCent = (t) => Math.round(parseFloat(t) * 100);
 
+// Lector de CSV que respeta comillas (dim_order_status tiene "Creado, sin pagar").
 function parsearCSV(texto) {
-  const lineas = texto.trim().split(/\r?\n/);
-  const cols = lineas[0].split(",");
-  return lineas.slice(1).map((l) => {
-    const v = l.split(",");
-    const fila = {};
-    cols.forEach((c, i) => { fila[c] = v[i] ?? ""; });
-    return fila;
-  });
-}
-
-let PEDIDOS = [];      // un objeto por pedido, ya preparado
-let MESES = [];        // "2024-01" … "2025-09"
-let PROVINCIAS = [];
-
-function preparar(ventas, direcciones, provincias) {
-  const nombreProv = Object.fromEntries(provincias.map((p) => [p.province_id, p.name]));
-  const provDeDireccion = Object.fromEntries(direcciones.map((d) => [d.address_id, nombreProv[d.province_id]]));
-
-  PEDIDOS = ventas.map((p) => {
-    const online = p.store_id === "";
-    const total = aCent(p.total_amount);
-    return {
-      ym: p.order_date.slice(0, 7),
-      canal: online ? "online" : "offline",
-      prov: provDeDireccion[p.shipping_address_id] ?? "Desconocida",
-      estado: p.status,
-      total,
-      sinEnvio: total - aCent(p.shipping_fee),
-      neto: aCent(p.subtotal),
-    };
-  });
-  MESES = [...new Set(PEDIDOS.map((p) => p.ym))].sort();
-  PROVINCIAS = [...new Set(PEDIDOS.map((p) => p.prov))].sort((a, b) => a.localeCompare(b, "es"));
+  const filas = [];
+  let fila = [], campo = "", comillas = false;
+  for (let i = 0; i < texto.length; i++) {
+    const c = texto[i];
+    if (comillas) {
+      if (c === '"' && texto[i + 1] === '"') { campo += '"'; i++; }
+      else if (c === '"') comillas = false;
+      else campo += c;
+    } else if (c === '"') comillas = true;
+    else if (c === ",") { fila.push(campo); campo = ""; }
+    else if (c === "\n" || c === "\r") {
+      if (c === "\r" && texto[i + 1] === "\n") i++;
+      fila.push(campo); filas.push(fila); fila = []; campo = "";
+    } else campo += c;
+  }
+  if (campo !== "" || fila.length) { fila.push(campo); filas.push(fila); }
+  const [cols, ...datos] = filas.filter((f) => f.length > 1 || f[0] !== "");
+  return datos.map((v) => Object.fromEntries(cols.map((c, i) => [c, v[i] ?? ""])));
 }
 
 // ---------------------------------------------------------------------
-// Estado de los filtros
+// Modelo: hecho + dimensiones (como las relaciones de Power BI)
+// ---------------------------------------------------------------------
+let PEDIDOS = [];     // filas de fact_sales_order con los atributos de sus dimensiones
+let MESES = [];       // "2024-01" … "2025-09"
+let PROVINCIAS = [];
+let ESTADOS = [];     // códigos de dim_order_status, en orden visual
+let DIM_ESTADO = {};  // status_code → { descripcion, esVenta }
+
+function preparar({ hecho, fecha, canal, provincia, estado }) {
+  // Cada dimensión se indexa por su clave subrogada, igual que una relación 1 a N
+  const mesDe = Object.fromEntries(fecha.map((d) => [d.date_key, d.year_month]));
+  const canalDe = Object.fromEntries(canal.map((c) => [c.channel_key, c.code === "ONLINE" ? "online" : "offline"]));
+  const provDe = Object.fromEntries(provincia.map((p) => [p.province_key, p.name]));
+  const estadoDe = Object.fromEntries(estado.map((e) => [e.order_status_key, e.status_code]));
+  DIM_ESTADO = Object.fromEntries(estado.map((e) => [e.status_code, { descripcion: e.description, esVenta: e.is_sale === "true" }]));
+
+  PEDIDOS = hecho.map((f) => ({
+    ym: mesDe[f.order_date_key],
+    canal: canalDe[f.channel_key],
+    prov: provDe[f.province_key],
+    estado: estadoDe[f.order_status_key],
+    // Medidas del hecho, tal como las dejó el DW
+    esVenta: f.is_sale === "true",          // regla de negocio ya aplicada en el DW
+    ventas: aCent(f.sales_amount),          // total_amount si es venta, 0 si no
+    total: aCent(f.total_amount),           // monto del pedido (para el gráfico de estados)
+    envio: aCent(f.shipping_fee),
+  }));
+  MESES = [...new Set(PEDIDOS.map((p) => p.ym))].sort();
+  PROVINCIAS = [...new Set(PEDIDOS.map((p) => p.prov))].sort((a, b) => a.localeCompare(b, "es"));
+  ESTADOS = ORDEN_ESTADOS.filter((e) => DIM_ESTADO[e]);
+}
+
+// ---------------------------------------------------------------------
+// Estado de los filtros (solo cortes por dimensiones)
 // ---------------------------------------------------------------------
 const estadoInicial = () => ({
   desde: MESES[0], hasta: MESES[MESES.length - 1],
-  canal: "todos", prov: "todas", monto: "total",
-  estados: new Set(REGLA_CONSIGNA),
+  canal: "todos", prov: "todas",
   rangoPrevio: null, // para deshacer el clic en un mes
 });
 let F = null;
 
+// Agregación: filtrar por dimensiones y sumar medidas
 function calcular() {
   const base = PEDIDOS.filter((p) =>
     p.ym >= F.desde && p.ym <= F.hasta &&
@@ -96,21 +102,20 @@ function calcular() {
     (F.prov === "todas" || p.prov === F.prov));
 
   const porEstado = Object.fromEntries(ESTADOS.map((e) => [e, { pedidos: 0, cent: 0 }]));
-  const canal = { online: { pedidos: 0, cent: 0, sinEnvio: 0 }, offline: { pedidos: 0, cent: 0, sinEnvio: 0 } };
+  const canal = { online: { pedidos: 0, cent: 0, envio: 0 }, offline: { pedidos: 0, cent: 0, envio: 0 } };
   const meses = Object.fromEntries(MESES.filter((m) => m >= F.desde && m <= F.hasta)
     .map((m) => [m, { online: { pedidos: 0, cent: 0 }, offline: { pedidos: 0, cent: 0 } }]));
 
   for (const p of base) {
-    const monto = p[F.monto];
     porEstado[p.estado].pedidos += 1;
-    porEstado[p.estado].cent += monto;
-    if (!F.estados.has(p.estado)) continue;
+    porEstado[p.estado].cent += p.total;
+    if (!p.esVenta) continue;              // COUNT/SUM ... WHERE is_sale
     const c = canal[p.canal];
     c.pedidos += 1;
-    c.cent += monto;
-    c.sinEnvio += p.sinEnvio;
+    c.cent += p.ventas;                    // SUM(sales_amount)
+    c.envio += p.envio;
     meses[p.ym][p.canal].pedidos += 1;
-    meses[p.ym][p.canal].cent += monto;
+    meses[p.ym][p.canal].cent += p.ventas;
   }
   const pedidos = canal.online.pedidos + canal.offline.pedidos;
   const cent = canal.online.cent + canal.offline.cent;
@@ -292,33 +297,26 @@ function graficoEstados(r) {
 
   ESTADOS.forEach((e, i) => {
     const d = r.porEstado[e];
-    const cuenta = F.estados.has(e);
+    const cuenta = DIM_ESTADO[e].esVenta;   // viene de dim_order_status.is_sale
     const y0 = m.t + i * fila;
-    const g = el("g", { class: "marca", tabindex: 0, role: "button", "aria-pressed": String(cuenta),
-      "aria-label": `${e}: ${fEntero.format(d.pedidos)} pedidos, ${cuenta ? "cuenta" : "no cuenta"} como venta. Clic para cambiar` }, svg);
+    const g = el("g", { class: "marca", tabindex: 0,
+      "aria-label": `${e}: ${fEntero.format(d.pedidos)} pedidos, ${cuenta ? "cuenta" : "no cuenta"} como venta` }, svg);
     el("rect", { x: 0, y: y0, width: W, height: fila, fill: "transparent" }, g);
     texto(g, 0, y0 + 17, e, { class: `etq-barra${cuenta ? "" : " no"}`, "font-weight": 600 });
-    texto(g, 0, y0 + 32, DESC[e], { class: "eje" });
+    texto(g, 0, y0 + 32, DIM_ESTADO[e].descripcion, { class: "eje" });
     const w = (d.pedidos / max) * iw;
     if (w > 0) el("path", { d: barraHorizontal(m.l, y0 + 10, Math.max(w, 2), 18), fill: cuenta ? css("--si") : css("--no") }, g);
     texto(g, m.l + w + 6, y0 + 23, fEntero.format(d.pedidos), { class: "valor-barra" });
 
-    const tip = (ev) => mostrarTooltip(ev, `${e} · ${DESC[e]}`, [
+    const tip = (ev) => mostrarTooltip(ev, `${e} · ${DIM_ESTADO[e].descripcion}`, [
       [null, "Pedidos", fEntero.format(d.pedidos)],
-      [null, "Monto", pesos(d.cent)],
-      [null, "¿Cuenta como venta?", cuenta ? "Sí" : "No"],
+      [null, "Monto (total_amount)", pesos(d.cent)],
+      [null, "is_sale", cuenta ? "true" : "false"],
     ]);
     g.addEventListener("pointermove", tip);
     g.addEventListener("focus", tip);
     g.addEventListener("pointerleave", ocultarTooltip);
     g.addEventListener("blur", ocultarTooltip);
-    const cambiar = () => {
-      F.estados.has(e) ? F.estados.delete(e) : F.estados.add(e);
-      ocultarTooltip();
-      render();
-    };
-    g.addEventListener("click", cambiar);
-    g.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); cambiar(); } });
   });
   cont.replaceChildren(svg);
 }
@@ -416,8 +414,8 @@ function descripcionFiltros() {
 
 function respuestas(r) {
   const filtros = descripcionFiltros();
-  const incluidos = ESTADOS.filter((e) => F.estados.has(e));
-  const excluidos = ESTADOS.filter((e) => !F.estados.has(e) && r.porEstado[e].pedidos > 0);
+  const incluidos = ESTADOS.filter((e) => DIM_ESTADO[e].esVenta);
+  const excluidos = ESTADOS.filter((e) => !DIM_ESTADO[e].esVenta && r.porEstado[e].pedidos > 0);
   const centFuera = excluidos.reduce((s, e) => s + r.porEstado[e].cent, 0);
   const pedFuera = excluidos.reduce((s, e) => s + r.porEstado[e].pedidos, 0);
 
@@ -425,9 +423,9 @@ function respuestas(r) {
   document.getElementById("k-ventas").textContent = pesos(r.cent);
   document.getElementById("k-ventas-det").textContent = filtros;
   document.getElementById("j1").innerHTML =
-    `Suma de <code>${F.monto === "total" ? "total_amount" : F.monto === "neto" ? "subtotal" : "total_amount − shipping_fee"}</code> de los ` +
-    `${fEntero.format(r.pedidos)} pedidos que cuentan como venta = <strong>${pesos(r.cent)}</strong>. ` +
-    (pedFuera ? `Quedan afuera ${fEntero.format(pedFuera)} pedidos por ${pesos(centFuera)} (${excluidos.join(", ")}).` : "No queda ningún pedido afuera.");
+    `<code>SUM(fact_sales_order.sales_amount)</code> = <strong>${pesos(r.cent)}</strong>. ` +
+    `El DW ya dejó <code>sales_amount</code> = <code>total_amount</code> en las ventas válidas y 0 en el resto, así que el tablero solo suma. ` +
+    (pedFuera ? `Los ${fEntero.format(pedFuera)} pedidos que no son venta (${excluidos.join(", ")}, ${pesos(centFuera)}) suman 0.` : "");
 
   // Pregunta 2
   document.getElementById("k-pedidos").textContent = fEntero.format(r.pedidos);
@@ -435,11 +433,9 @@ function respuestas(r) {
     ? `${fPct.format(r.pedidos / r.totalBase)} de los ${fEntero.format(r.totalBase)} pedidos del período`
     : "Sin pedidos con estos filtros";
   const sumandos = incluidos.map((e) => `${e} (${fEntero.format(r.porEstado[e].pedidos)})`);
-  document.getElementById("j2").innerHTML = incluidos.length
-    ? `${sumandos.join(" + ")} = <strong>${fEntero.format(r.pedidos)}</strong> pedidos. ` +
-      (F.estados.has("PAID") ? "Los PAID cuentan aunque no se entregaron, porque el cobro ya se concretó. " : "") +
-      (F.estados.has("REFUNDED") ? "Ojo: los REFUNDED no deberían contar, porque el dinero se devolvió." : "")
-    : "No hay ningún estado incluido: activá alguno en el gráfico 2.";
+  document.getElementById("j2").innerHTML =
+    `Pedidos de <code>fact_sales_order</code> con <code>is_sale = true</code>: ${sumandos.join(" + ")} = <strong>${fEntero.format(r.pedidos)}</strong>. ` +
+    `La regla "venta = PAID o FULFILLED" vive en <code>dim_order_status.is_sale</code> y el DW la copió al hecho.`;
 
   // Pregunta 3
   const t = (c) => (c.pedidos ? c.cent / c.pedidos : null);
@@ -457,10 +453,11 @@ function respuestas(r) {
     const dif = tOn / tOff - 1;
     det = `Online ${dif >= 0 ? "+" : ""}${fPct.format(dif)} frente a offline`;
     j3 = `${linea("Online", r.canal.online)}. ${linea("Offline", r.canal.offline)}. `;
-    if (F.monto === "total") {
-      const sOn = r.canal.online.sinEnvio / r.canal.online.pedidos, sOff = r.canal.offline.sinEnvio / r.canal.offline.pedidos;
-      j3 += `Gran parte de la diferencia es el envío, que solo pagan los pedidos online: sin envío quedan en ${fPesos.format(sOn / 100)} online y ${fPesos.format(sOff / 100)} offline. Probalo con el filtro "Monto".`;
-    }
+    const sOn = (r.canal.online.cent - r.canal.online.envio) / r.canal.online.pedidos;
+    const sOff = (r.canal.offline.cent - r.canal.offline.envio) / r.canal.offline.pedidos;
+    const explica = Math.abs(sOn - sOff) < Math.abs(tOn - tOff) * 0.25;
+    j3 += `Sin el envío (<code>shipping_fee</code>, que solo pagan los pedidos online) quedan en ${fPesos.format(sOn / 100)} online y ${fPesos.format(sOff / 100)} offline` +
+      (explica ? ": la diferencia es casi toda el envío." : ": el envío explica solo una parte de la diferencia.");
   } else if (tOn !== null) {
     j3 = `${linea("Online", r.canal.online)}.`;
   } else if (tOff !== null) {
@@ -471,14 +468,6 @@ function respuestas(r) {
   document.getElementById("k-ticket-det").textContent = det || filtros;
   document.getElementById("j3").innerHTML = j3;
 
-  // Aviso cuando la vista no sigue la regla de la consigna
-  const reglaCambiada = !(F.estados.size === REGLA_CONSIGNA.length && REGLA_CONSIGNA.every((e) => F.estados.has(e)));
-  const avisos = [];
-  if (reglaCambiada) avisos.push(`estás contando como venta ${incluidos.length ? incluidos.join(", ") : "ningún estado"} (la consigna cuenta PAID y FULFILLED)`);
-  if (F.monto !== "total") avisos.push(`el monto es ${MONTOS[F.monto]} en lugar de total_amount`);
-  const aviso = document.getElementById("aviso");
-  aviso.hidden = !avisos.length;
-  if (avisos.length) aviso.textContent = `Vista de exploración: ${avisos.join(" y ")}. Usá "Restablecer" para volver a las respuestas oficiales.`;
 }
 
 // ---------------------------------------------------------------------
@@ -497,7 +486,6 @@ function sincronizarControles() {
   document.getElementById("f-desde").value = F.desde;
   document.getElementById("f-hasta").value = F.hasta;
   document.getElementById("f-prov").value = F.prov;
-  document.getElementById("f-monto").value = F.monto;
 }
 function alternarMes(k) {
   if (F.desde === k && F.hasta === k && F.rangoPrevio) {
@@ -530,7 +518,6 @@ function armarFiltros() {
   desde.addEventListener("change", () => { F.desde = desde.value; if (F.hasta < F.desde) F.hasta = F.desde; F.rangoPrevio = null; render(); });
   hasta.addEventListener("change", () => { F.hasta = hasta.value; if (F.desde > F.hasta) F.desde = F.hasta; F.rangoPrevio = null; render(); });
   prov.addEventListener("change", () => { F.prov = prov.value; render(); });
-  document.getElementById("f-monto").addEventListener("change", (e) => { F.monto = e.target.value; render(); });
   document.getElementById("f-reset").addEventListener("click", () => { F = estadoInicial(); render(); });
 }
 
@@ -554,13 +541,13 @@ async function iniciar() {
       if (!resp.ok) throw new Error(`${archivo}: HTTP ${resp.status}`);
       return parsearCSV(await resp.text());
     };
-    const [ventas, direcciones, provincias] = await Promise.all(
-      ["sales_order.csv", "address.csv", "province.csv"].map(leer));
-    preparar(ventas, direcciones, provincias);
+    const archivos = ["fact_sales_order.csv", "dim_date.csv", "dim_channel.csv", "dim_province.csv", "dim_order_status.csv"];
+    const [hecho, fecha, canal, provincia, estadoPedido] = await Promise.all(archivos.map(leer));
+    preparar({ hecho, fecha, canal, provincia, estado: estadoPedido });
     F = estadoInicial();
     armarFiltros();
     render();
-    estado.textContent = `Calculado en vivo sobre ${fEntero.format(PEDIDOS.length)} pedidos de data/sales_order.csv`;
+    estado.textContent = `Calculado en vivo sobre ${fEntero.format(PEDIDOS.length)} pedidos de fact_sales_order (modelo estrella del DW)`;
     estado.classList.add("ok");
 
     let espera;

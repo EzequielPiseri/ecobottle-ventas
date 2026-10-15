@@ -13,7 +13,7 @@
     <div class="wrap">
       <p class="eyebrow">EcoBottle AR · Tablero de ventas</p>
       <h1>Ventas en 3 preguntas</h1>
-      <p class="lede">¿Cuánto vendimos? ¿Cuántos pedidos cuentan como venta? ¿Cuál fue el ticket promedio online y offline? Todo se calcula en tu navegador desde los datos de origen: cambiá los filtros y los números se recalculan.</p>
+      <p class="lede">¿Cuánto vendimos? ¿Cuántos pedidos cuentan como venta? ¿Cuál fue el ticket promedio online y offline? Los datos vienen del data warehouse (modelo estrella): cambiá los filtros y los números se recalculan.</p>
       <p id="estado" class="estado">Cargando datos…</p>
     </div>
   </header>
@@ -48,18 +48,8 @@
         <label for="f-prov" class="etq-filtro">Provincia</label>
         <select id="f-prov"><option value="todas">Todas</option></select>
       </div>
-      <div class="filtro">
-        <label for="f-monto" class="etq-filtro">Monto</label>
-        <select id="f-monto">
-          <option value="total">Con IVA y envío (total_amount)</option>
-          <option value="sinEnvio">Con IVA, sin envío</option>
-          <option value="neto">Sin IVA ni envío (subtotal)</option>
-        </select>
-      </div>
       <button type="button" id="f-reset" class="boton-sec">Restablecer</button>
     </section>
-
-    <p id="aviso" class="aviso" hidden></p>
 
     <!-- Respuestas -->
     <section class="kpis" aria-label="Respuestas">
@@ -110,7 +100,7 @@
         <header class="tarjeta-cab">
           <h2><span class="num">2</span>¿Qué pedidos cuentan como venta?</h2>
         </header>
-        <p class="ayuda">Pedidos por estado. La consigna cuenta solo <code>PAID</code> y <code>FULFILLED</code>. Hacé clic en un estado para incluirlo o excluirlo y ver cuánto cambian las respuestas.</p>
+        <p class="ayuda">Pedidos por estado (<code>dim_order_status</code>). En verde los que el data warehouse marca con <code>is_sale = true</code>: solo <code>PAID</code> y <code>FULFILLED</code>. Pasá el mouse para ver cantidad y monto.</p>
         <div class="grafico" id="g-estados"></div>
         <ul class="leyenda abajo">
           <li><i class="clave si"></i>Cuenta como venta</li>
@@ -137,14 +127,14 @@
           <div><h3><span class="num">2</span>Pedidos</h3><p id="j2"></p></div>
           <div><h3><span class="num">3</span>Ticket</h3><p id="j3"></p></div>
         </div>
-        <p class="reglas"><strong>Reglas de la consigna</strong> (README, "Cómo leer los datos"): es venta un pedido <code>PAID</code> o <code>FULFILLED</code>; <code>total_amount</code> = subtotal + IVA 21 % + envío; un pedido es online si <code>store_id</code> está vacío. La provincia sale de la dirección de envío.</p>
+        <p class="reglas"><strong>De dónde salen los datos:</strong> del modelo estrella del data warehouse del TP (<code>dw/</code>): el hecho <code>fact_sales_order</code> (un pedido por fila) y las dimensiones <code>dim_date</code>, <code>dim_channel</code>, <code>dim_province</code> y <code>dim_order_status</code>. Las transformaciones y la regla de negocio se hicieron en SQL al construir el DW (la regla de venta está en <code>dim_order_status.is_sale</code>). El tablero no transforma: filtra por dimensiones y suma medidas.</p>
       </article>
     </section>
 
   </main>
 
   <footer class="wrap pie">
-    <p>Datos: <code>sales_order.csv</code>, <code>address.csv</code> y <code>province.csv</code> del repositorio de la cátedra (11.969 pedidos, enero 2024 a septiembre 2025). Cálculo en <code>app.js</code>.</p>
+    <p>Datos: <code>fact_sales_order</code>, <code>dim_date</code>, <code>dim_channel</code>, <code>dim_province</code> y <code>dim_order_status</code>, exportados por el data warehouse del TP (11.969 pedidos, enero 2024 a septiembre 2025). Cálculo en <code>app.js</code>.</p>
   </footer>
 
   <div id="tooltip" class="tooltip" role="status" hidden></div>

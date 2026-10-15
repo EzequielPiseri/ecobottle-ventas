@@ -100,7 +100,6 @@ select {
 .boton-sec:hover { background: var(--suave); }
 button:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px solid var(--acento); outline-offset: 2px; }
 
-.aviso { background: var(--aviso-fondo); color: var(--aviso-tinta); border-radius: 8px; padding: 10px 14px; margin: 0 0 16px; font-size: .92rem; }
 
 /* KPIs */
 .kpis { display: grid; grid-template-columns: 1.2fr 1fr 1.4fr; gap: 16px; margin-bottom: 16px; }
