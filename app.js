@@ -1,35 +1,32 @@
 // Tablero de ventas EcoBottle AR
-// Lee el modelo estrella del data warehouse (fact_sales_order + dimensiones)
-// y solo FILTRA por dimensiones y AGREGA medidas. Las transformaciones y la
-// regla de negocio ya están resueltas en el DW (sql/01 y sql/02 del TP).
-// Sin librerías: SVG y JavaScript puro.
+// Lee las tablas MART del data warehouse (sql/05_marts.sql del TP), donde
+// los KPIs ya vienen calculados para cada combinación de filtros.
+// El tablero NO calcula: busca la fila que corresponde a los filtros
+// elegidos y la muestra. Sin librerías: SVG y JavaScript puro.
 
 // ---------------------------------------------------------------------
 // Constantes de presentación
 // ---------------------------------------------------------------------
 const ORDEN_ESTADOS = ["FULFILLED", "PAID", "CANCELLED", "REFUNDED", "CREATED"]; // solo el orden visual
 const MESES_CORTOS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+const CANALES = ["ONLINE", "OFFLINE"];
 
 // ---------------------------------------------------------------------
-// Formatos
+// Formatos (solo presentación: no cambian ningún valor)
 // ---------------------------------------------------------------------
 const fPesos = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 });
 const fEntero = new Intl.NumberFormat("es-AR");
 const fPct = new Intl.NumberFormat("es-AR", { style: "percent", minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const fCompacto = new Intl.NumberFormat("es-AR", { notation: "compact", maximumFractionDigits: 1 });
 
-const pesos = (cent) => fPesos.format(cent / 100);
+const pesos = (v) => (v === null || v === undefined || Number.isNaN(v) ? "—" : fPesos.format(v));
 const pesosCompacto = (v) => "$ " + fCompacto.format(v);
 const etiquetaMes = (ym) => `${MESES_CORTOS[+ym.slice(5, 7) - 1]} ${ym.slice(2, 4)}`;
 const etiquetaMesLarga = (ym) => `${MESES_CORTOS[+ym.slice(5, 7) - 1]} ${ym.slice(0, 4)}`;
 
 // ---------------------------------------------------------------------
-// Lectura de CSV
+// Lectura de CSV (respeta comillas)
 // ---------------------------------------------------------------------
-// Los montos se pasan a centavos enteros para que las sumas sean exactas.
-const aCent = (t) => Math.round(parseFloat(t) * 100);
-
-// Lector de CSV que respeta comillas (dim_order_status tiene "Creado, sin pagar").
 function parsearCSV(texto) {
   const filas = [];
   let fila = [], campo = "", comillas = false;
@@ -50,77 +47,61 @@ function parsearCSV(texto) {
   const [cols, ...datos] = filas.filter((f) => f.length > 1 || f[0] !== "");
   return datos.map((v) => Object.fromEntries(cols.map((c, i) => [c, v[i] ?? ""])));
 }
+const num = (t) => (t === "" || t === undefined ? null : Number(t));
 
 // ---------------------------------------------------------------------
-// Modelo: hecho + dimensiones (como las relaciones de Power BI)
+// Datos: índices para buscar filas del mart (sin calcular nada)
 // ---------------------------------------------------------------------
-let PEDIDOS = [];     // filas de fact_sales_order con los atributos de sus dimensiones
-let MESES = [];       // "2024-01" … "2025-09"
+const KPI = new Map();      // "período|canal|provincia" → fila de mart_sales_kpi
+const ESTADO = new Map();   // "período|canal|provincia" → filas de mart_order_status
+let MESES = [];
 let PROVINCIAS = [];
-let ESTADOS = [];     // códigos de dim_order_status, en orden visual
-let DIM_ESTADO = {};  // status_code → { descripcion, esVenta }
 
-function preparar({ hecho, fecha, canal, provincia, estado }) {
-  // Cada dimensión se indexa por su clave subrogada, igual que una relación 1 a N
-  const mesDe = Object.fromEntries(fecha.map((d) => [d.date_key, d.year_month]));
-  const canalDe = Object.fromEntries(canal.map((c) => [c.channel_key, c.code === "ONLINE" ? "online" : "offline"]));
-  const provDe = Object.fromEntries(provincia.map((p) => [p.province_key, p.name]));
-  const estadoDe = Object.fromEntries(estado.map((e) => [e.order_status_key, e.status_code]));
-  DIM_ESTADO = Object.fromEntries(estado.map((e) => [e.status_code, { descripcion: e.description, esVenta: e.is_sale === "true" }]));
+const clave = (periodo, canal, prov) => `${periodo}|${canal}|${prov}`;
 
-  PEDIDOS = hecho.map((f) => ({
-    ym: mesDe[f.order_date_key],
-    canal: canalDe[f.channel_key],
-    prov: provDe[f.province_key],
-    estado: estadoDe[f.order_status_key],
-    // Medidas del hecho, tal como las dejó el DW
-    esVenta: f.is_sale === "true",          // regla de negocio ya aplicada en el DW
-    ventas: aCent(f.sales_amount),          // total_amount si es venta, 0 si no
-    total: aCent(f.total_amount),           // monto del pedido (para el gráfico de estados)
-    envio: aCent(f.shipping_fee),
-  }));
-  MESES = [...new Set(PEDIDOS.map((p) => p.ym))].sort();
-  PROVINCIAS = [...new Set(PEDIDOS.map((p) => p.prov))].sort((a, b) => a.localeCompare(b, "es"));
-  ESTADOS = ORDEN_ESTADOS.filter((e) => DIM_ESTADO[e]);
+function preparar(kpi, estados) {
+  for (const f of kpi) {
+    KPI.set(clave(f.period, f.channel, f.province), {
+      pedidosTotal: num(f.orders_total),
+      pedidosVenta: num(f.sale_orders),
+      pedidosNoVenta: num(f.non_sale_orders),
+      proporcionVenta: num(f.sale_order_share),
+      ventas: num(f.sales_amount),
+      ventasSinIva: num(f.sales_net_amount),
+      iva: num(f.sales_tax_amount),
+      envio: num(f.sales_shipping_amount),
+      montoNoVenta: num(f.non_sale_amount),
+      ticket: num(f.ticket_amount),
+      ticketSinIva: num(f.ticket_net_amount),
+      ticketSinEnvio: num(f.ticket_no_shipping),
+    });
+  }
+  for (const f of estados) {
+    const k = clave(f.period, f.channel, f.province);
+    if (!ESTADO.has(k)) ESTADO.set(k, {});
+    ESTADO.get(k)[f.status_code] = {
+      descripcion: f.status_description,
+      esVenta: f.is_sale === "true",
+      pedidos: num(f.orders),
+      monto: num(f.total_amount),
+    };
+  }
+  MESES = [...new Set(kpi.filter((f) => f.period_type === "month").map((f) => f.period))].sort();
+  PROVINCIAS = [...new Set(kpi.map((f) => f.province))].filter((p) => p !== "Todas").sort((a, b) => a.localeCompare(b, "es"));
 }
 
 // ---------------------------------------------------------------------
-// Estado de los filtros (solo cortes por dimensiones)
+// Estado de los filtros
 // ---------------------------------------------------------------------
-const estadoInicial = () => ({
-  desde: MESES[0], hasta: MESES[MESES.length - 1],
-  canal: "todos", prov: "todas",
-  rangoPrevio: null, // para deshacer el clic en un mes
-});
+const estadoInicial = () => ({ anio: "Todo", mes: "", canal: "Todos", prov: "Todas", iva: "con" });
 let F = null;
 
-// Agregación: filtrar por dimensiones y sumar medidas
-function calcular() {
-  const base = PEDIDOS.filter((p) =>
-    p.ym >= F.desde && p.ym <= F.hasta &&
-    (F.canal === "todos" || p.canal === F.canal) &&
-    (F.prov === "todas" || p.prov === F.prov));
-
-  const porEstado = Object.fromEntries(ESTADOS.map((e) => [e, { pedidos: 0, cent: 0 }]));
-  const canal = { online: { pedidos: 0, cent: 0, envio: 0 }, offline: { pedidos: 0, cent: 0, envio: 0 } };
-  const meses = Object.fromEntries(MESES.filter((m) => m >= F.desde && m <= F.hasta)
-    .map((m) => [m, { online: { pedidos: 0, cent: 0 }, offline: { pedidos: 0, cent: 0 } }]));
-
-  for (const p of base) {
-    porEstado[p.estado].pedidos += 1;
-    porEstado[p.estado].cent += p.total;
-    if (!p.esVenta) continue;              // COUNT/SUM ... WHERE is_sale
-    const c = canal[p.canal];
-    c.pedidos += 1;
-    c.cent += p.ventas;                    // SUM(sales_amount)
-    c.envio += p.envio;
-    meses[p.ym][p.canal].pedidos += 1;
-    meses[p.ym][p.canal].cent += p.ventas;
-  }
-  const pedidos = canal.online.pedidos + canal.offline.pedidos;
-  const cent = canal.online.cent + canal.offline.cent;
-  return { totalBase: base.length, porEstado, canal, meses, pedidos, cent };
-}
+const periodo = () => F.mes || F.anio;
+const mesesVisibles = () => (F.mes ? [F.mes] : F.anio === "Todo" ? MESES : MESES.filter((m) => m.startsWith(F.anio)));
+const fila = (per, canal = F.canal, prov = F.prov) => KPI.get(clave(per, canal, prov));
+const ventasDe = (r) => (r ? (F.iva === "con" ? r.ventas : r.ventasSinIva) : null);
+const ticketDe = (r) => (r ? (F.iva === "con" ? r.ticket : r.ticketSinIva) : null);
+const etiquetaIva = () => (F.iva === "con" ? "con IVA" : "sin IVA");
 
 // ---------------------------------------------------------------------
 // Utilidades de SVG y tooltip
@@ -137,7 +118,6 @@ function texto(padre, x, y, contenido, attrs = {}) {
   t.textContent = contenido;
   return t;
 }
-// Barra con extremo de datos redondeado (4px) y base recta
 function barraVertical(x, y, w, h, r = 4) {
   r = Math.min(r, h, w / 2);
   return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`;
@@ -189,21 +169,27 @@ function mostrarTooltip(evento, titulo, filas) {
 }
 const ocultarTooltip = () => { tooltip.hidden = true; };
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const colorCanal = (c) => css(c === "ONLINE" ? "--online" : "--offline");
+const nombreCanal = (c) => (c === "ONLINE" ? "Online" : "Offline");
+const canalesVisibles = () => (F.canal === "Todos" ? CANALES : [F.canal]);
 
 // ---------------------------------------------------------------------
-// Gráfico 1: ventas por mes, apiladas por canal (clic = filtrar mes)
+// Gráfico 1: ventas por mes, apiladas por canal (clic = elegir ese mes)
 // ---------------------------------------------------------------------
-function graficoMeses(r) {
+function graficoMeses() {
   const cont = document.getElementById("g-meses");
   const W = cont.clientWidth, H = 260;
   const m = { l: 56, r: 8, t: 12, b: 30 };
   const iw = W - m.l - m.r, ih = H - m.t - m.b;
-  const meses = Object.keys(r.meses);
+  const meses = mesesVisibles();
+  const canales = canalesVisibles();
   const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Ventas por mes y canal" });
-  const max = Math.max(0, ...meses.map((k) => r.meses[k].online.cent + r.meses[k].offline.cent)) / 100;
+
+  // El total de cada mes viene de su propia fila del mart; el tablero no suma
+  const totalMes = (k) => ventasDe(fila(k));
+  const max = Math.max(0, ...meses.map((k) => totalMes(k) ?? 0));
   const { max: ymax, paso } = escalaLinda(max);
   const y = (v) => m.t + ih - (v / ymax) * ih;
-
   for (let v = 0; v <= ymax + 1e-9; v += paso) {
     el("line", { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), class: v === 0 ? "base" : "eje-linea" }, svg);
     texto(svg, m.l - 8, y(v) + 4, pesosCompacto(v), { class: "eje", "text-anchor": "end" });
@@ -217,54 +203,57 @@ function graficoMeses(r) {
   const banda = iw / meses.length;
   const bw = Math.min(24, banda * 0.62);
   const cadaCuanto = banda >= 38 ? 1 : banda >= 18 ? 3 : 6;
-  const unSoloMes = F.desde === F.hasta;
+  const base = m.t + ih;
 
   meses.forEach((k, i) => {
-    const d = r.meses[k];
     const cx = m.l + banda * i + banda / 2;
     const x0 = cx - bw / 2;
-    const vOn = d.online.cent / 100, vOff = d.offline.cent / 100;
-    const g = el("g", { class: "marca", tabindex: 0, role: "button", "aria-label": `${etiquetaMesLarga(k)}: ${pesos(d.online.cent + d.offline.cent)}. Clic para filtrar` }, svg);
+    const g = el("g", { class: "marca", tabindex: 0, role: "button",
+      "aria-label": `${etiquetaMesLarga(k)}: ${pesos(totalMes(k))}. Clic para ver solo este mes` }, svg);
 
-    // Apilado: online abajo, offline arriba, con 2px de superficie entre segmentos
-    const hOn = (vOn / ymax) * ih, hOff = (vOff / ymax) * ih;
-    const gap = hOn > 0 && hOff > 0 ? 2 : 0;
-    const base = m.t + ih;
-    if (hOn > 0) {
-      const top = hOff > 0 ? `M${x0},${base}V${base - hOn}H${x0 + bw}V${base}Z` : barraVertical(x0, base - hOn, bw, hOn);
-      el("path", { d: top, fill: css("--online") }, g);
-    }
-    if (hOff > 0) {
-      const h = Math.max(0, hOff - gap);
-      el("path", { d: barraVertical(x0, base - hOn - gap - h, bw, h), fill: css("--offline") }, g);
-    }
-    // Zona de clic más grande que la barra
+    // Segmentos apilados (dibujo): cada uno con el valor de su fila del mart
+    let tope = base;
+    canales.forEach((c, j) => {
+      const v = ventasDe(fila(k, c)) ?? 0;
+      const h = (v / ymax) * ih;
+      if (h <= 0) return;
+      const gap = j > 0 ? 2 : 0;
+      const alto = Math.max(0, h - gap);
+      const yTop = tope - gap - alto;
+      const ultimo = j === canales.length - 1;
+      const d = ultimo ? barraVertical(x0, yTop, bw, alto) : `M${x0},${tope - gap}V${yTop}H${x0 + bw}V${tope - gap}Z`;
+      el("path", { d, fill: colorCanal(c) }, g);
+      tope = yTop;
+    });
     el("rect", { x: m.l + banda * i, y: m.t, width: banda, height: ih, fill: "transparent" }, g);
 
-    if (i % cadaCuanto === 0 || unSoloMes) {
+    if (i % cadaCuanto === 0 || meses.length === 1) {
       texto(svg, cx, H - 10, etiquetaMes(k), { class: "eje", "text-anchor": "middle" });
     }
 
-    const filas = [];
-    if (F.canal !== "offline") filas.push([css("--online"), "Online", pesos(d.online.cent)]);
-    if (F.canal !== "online") filas.push([css("--offline"), "Offline", pesos(d.offline.cent)]);
-    filas.push([null, "Total", pesos(d.online.cent + d.offline.cent)]);
-    const tip = (e) => mostrarTooltip(e, etiquetaMesLarga(k), filas);
+    const filas = canales.map((c) => [colorCanal(c), nombreCanal(c), pesos(ventasDe(fila(k, c)))]);
+    if (canales.length > 1) filas.push([null, "Total", pesos(totalMes(k))]);
+    const tip = (e) => mostrarTooltip(e, `${etiquetaMesLarga(k)} · ${etiquetaIva()}`, filas);
     g.addEventListener("pointermove", tip);
     g.addEventListener("focus", tip);
     g.addEventListener("pointerleave", ocultarTooltip);
     g.addEventListener("blur", ocultarTooltip);
-    const elegir = () => { ocultarTooltip(); alternarMes(k); };
+    const elegir = () => {
+      ocultarTooltip();
+      if (F.mes === k) F.mes = "";
+      else { F.mes = k; if (F.anio !== "Todo") F.anio = k.slice(0, 4); }
+      render();
+    };
     g.addEventListener("click", elegir);
     g.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); elegir(); } });
   });
   cont.replaceChildren(svg);
 
-  // Tabla equivalente (el gráfico nunca es la única forma de leer los datos)
+  // Tabla equivalente
   const tabla = document.getElementById("t-meses");
   tabla.replaceChildren();
   const cab = tabla.createTHead().insertRow();
-  ["Mes", "Online", "Offline", "Total", "Pedidos válidos"].forEach((t, i) => {
+  ["Mes", ...canales.map(nombreCanal), "Total", "Pedidos válidos", "Ticket"].forEach((t, i) => {
     const th = document.createElement("th");
     th.textContent = t;
     if (i) th.className = "n";
@@ -272,11 +261,11 @@ function graficoMeses(r) {
   });
   const cuerpo = tabla.createTBody();
   meses.forEach((k) => {
-    const d = r.meses[k];
-    const fila = cuerpo.insertRow();
-    [etiquetaMesLarga(k), pesos(d.online.cent), pesos(d.offline.cent), pesos(d.online.cent + d.offline.cent),
-      fEntero.format(d.online.pedidos + d.offline.pedidos)].forEach((v, i) => {
-      const td = fila.insertCell();
+    const r = fila(k);
+    const tr = cuerpo.insertRow();
+    [etiquetaMesLarga(k), ...canales.map((c) => pesos(ventasDe(fila(k, c)))), pesos(ventasDe(r)),
+      r ? fEntero.format(r.pedidosVenta) : "—", pesos(ticketDe(r))].forEach((v, i) => {
+      const td = tr.insertCell();
       td.textContent = v;
       if (i) td.className = "n";
     });
@@ -284,34 +273,34 @@ function graficoMeses(r) {
 }
 
 // ---------------------------------------------------------------------
-// Gráfico 2: pedidos por estado (clic = incluir/excluir de la venta)
+// Gráfico 2: pedidos por estado (de mart_order_status)
 // ---------------------------------------------------------------------
-function graficoEstados(r) {
+function graficoEstados() {
   const cont = document.getElementById("g-estados");
+  const datos = ESTADO.get(clave(periodo(), F.canal, F.prov)) ?? {};
+  const estados = ORDEN_ESTADOS.filter((e) => datos[e]);
   const W = cont.clientWidth;
-  const fila = 40, m = { l: Math.min(210, W * 0.45), r: 64, t: 4 };
-  const H = m.t + fila * ESTADOS.length;
+  const alto = 40, m = { l: Math.min(210, W * 0.45), r: 64, t: 4 };
+  const H = m.t + alto * Math.max(1, estados.length);
   const iw = W - m.l - m.r;
-  const max = Math.max(1, ...ESTADOS.map((e) => r.porEstado[e].pedidos));
+  const max = Math.max(1, ...estados.map((e) => datos[e].pedidos));
   const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "group", "aria-label": "Pedidos por estado" });
 
-  ESTADOS.forEach((e, i) => {
-    const d = r.porEstado[e];
-    const cuenta = DIM_ESTADO[e].esVenta;   // viene de dim_order_status.is_sale
-    const y0 = m.t + i * fila;
+  estados.forEach((e, i) => {
+    const d = datos[e];
+    const y0 = m.t + i * alto;
     const g = el("g", { class: "marca", tabindex: 0,
-      "aria-label": `${e}: ${fEntero.format(d.pedidos)} pedidos, ${cuenta ? "cuenta" : "no cuenta"} como venta` }, svg);
-    el("rect", { x: 0, y: y0, width: W, height: fila, fill: "transparent" }, g);
-    texto(g, 0, y0 + 17, e, { class: `etq-barra${cuenta ? "" : " no"}`, "font-weight": 600 });
-    texto(g, 0, y0 + 32, DIM_ESTADO[e].descripcion, { class: "eje" });
+      "aria-label": `${e}: ${fEntero.format(d.pedidos)} pedidos, ${d.esVenta ? "cuenta" : "no cuenta"} como venta` }, svg);
+    el("rect", { x: 0, y: y0, width: W, height: alto, fill: "transparent" }, g);
+    texto(g, 0, y0 + 17, e, { class: `etq-barra${d.esVenta ? "" : " no"}`, "font-weight": 600 });
+    texto(g, 0, y0 + 32, d.descripcion, { class: "eje" });
     const w = (d.pedidos / max) * iw;
-    if (w > 0) el("path", { d: barraHorizontal(m.l, y0 + 10, Math.max(w, 2), 18), fill: cuenta ? css("--si") : css("--no") }, g);
+    if (w > 0) el("path", { d: barraHorizontal(m.l, y0 + 10, Math.max(w, 2), 18), fill: d.esVenta ? css("--si") : css("--no") }, g);
     texto(g, m.l + w + 6, y0 + 23, fEntero.format(d.pedidos), { class: "valor-barra" });
-
-    const tip = (ev) => mostrarTooltip(ev, `${e} · ${DIM_ESTADO[e].descripcion}`, [
+    const tip = (ev) => mostrarTooltip(ev, `${e} · ${d.descripcion}`, [
       [null, "Pedidos", fEntero.format(d.pedidos)],
-      [null, "Monto (total_amount)", pesos(d.cent)],
-      [null, "is_sale", cuenta ? "true" : "false"],
+      [null, "Monto (total_amount)", pesos(d.monto)],
+      [null, "is_sale", d.esVenta ? "true" : "false"],
     ]);
     g.addEventListener("pointermove", tip);
     g.addEventListener("focus", tip);
@@ -322,34 +311,31 @@ function graficoEstados(r) {
 }
 
 // ---------------------------------------------------------------------
-// Gráfico 3: ticket promedio por mes y canal (líneas con cruz de lectura)
+// Gráfico 3: ticket promedio por mes y canal (valores del mart)
 // ---------------------------------------------------------------------
-function graficoTicket(r) {
+function graficoTicket() {
   const cont = document.getElementById("g-ticket");
   const W = cont.clientWidth, H = 240;
   const m = { l: 56, r: 12, t: 12, b: 30 };
   const iw = W - m.l - m.r, ih = H - m.t - m.b;
-  const meses = Object.keys(r.meses);
-  const series = ["online", "offline"].filter((c) => F.canal === "todos" || F.canal === c);
-  const val = (k, c) => {
-    const d = r.meses[k][c];
-    return d.pedidos ? d.cent / 100 / d.pedidos : null;
-  };
-  const todos = meses.flatMap((k) => series.map((c) => val(k, c))).filter((v) => v !== null);
+  const meses = mesesVisibles();
+  const canales = canalesVisibles();
+  const val = (k, c) => ticketDe(fila(k, c));
+  const todos = meses.flatMap((k) => canales.map((c) => val(k, c))).filter((v) => v !== null);
   const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Ticket promedio por mes y canal" });
   if (!todos.length) {
     texto(svg, W / 2, H / 2, "No hay ventas con estos filtros", { class: "vacio", "text-anchor": "middle" });
     cont.replaceChildren(svg);
     return;
   }
-  // Eje con margen alrededor de los datos (en líneas no hace falta arrancar en 0)
+  // Escala del eje (dibujo): margen alrededor de los datos
   let lo = Math.min(...todos), hi = Math.max(...todos);
   const pad = Math.max((hi - lo) * 0.15, 500);
   lo -= pad; hi += pad;
   const paso = escalaLinda(hi - lo, 4).paso;
   lo = Math.floor(lo / paso) * paso; hi = Math.ceil(hi / paso) * paso;
   const y = (v) => m.t + ih - ((v - lo) / (hi - lo)) * ih;
-  const x = (i) => meses.length === 1 ? m.l + iw / 2 : m.l + (i / (meses.length - 1)) * iw;
+  const x = (i) => (meses.length === 1 ? m.l + iw / 2 : m.l + (i / (meses.length - 1)) * iw);
 
   for (let v = lo; v <= hi + 1e-9; v += paso) {
     el("line", { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), class: "eje-linea" }, svg);
@@ -360,7 +346,7 @@ function graficoTicket(r) {
     if (i % cadaCuanto === 0) texto(svg, x(i), H - 10, etiquetaMes(k), { class: "eje", "text-anchor": "middle" });
   });
 
-  for (const c of series) {
+  for (const c of canales) {
     let d = "", abierto = false;
     meses.forEach((k, i) => {
       const v = val(k, c);
@@ -368,28 +354,25 @@ function graficoTicket(r) {
       d += `${abierto ? "L" : "M"}${x(i)},${y(v)}`;
       abierto = true;
     });
-    el("path", { d, fill: "none", stroke: css(`--${c}`), "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }, svg);
-    if (meses.length === 1) el("circle", { cx: x(0), cy: y(val(meses[0], c)), r: 4, fill: css(`--${c}`) }, svg);
+    el("path", { d, fill: "none", stroke: colorCanal(c), "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }, svg);
+    if (meses.length === 1 && val(meses[0], c) !== null) el("circle", { cx: x(0), cy: y(val(meses[0], c)), r: 4, fill: colorCanal(c) }, svg);
   }
 
-  // Capa de lectura: la cruz encuentra el mes más cercano
   const cruz = el("line", { y1: m.t, y2: m.t + ih, class: "cruz", visibility: "hidden" }, svg);
-  const puntos = series.map((c) => el("circle", { r: 4, fill: css(`--${c}`), stroke: css("--tarjeta"), "stroke-width": 2, visibility: "hidden" }, svg));
+  const puntos = canales.map((c) => el("circle", { r: 4, fill: colorCanal(c), stroke: css("--tarjeta"), "stroke-width": 2, visibility: "hidden" }, svg));
   const capa = el("rect", { x: m.l, y: m.t, width: iw, height: ih, fill: "transparent" }, svg);
   capa.addEventListener("pointermove", (e) => {
     const caja = svg.getBoundingClientRect();
     const px = ((e.clientX - caja.left) / caja.width) * W;
     const i = meses.length === 1 ? 0 : Math.max(0, Math.min(meses.length - 1, Math.round(((px - m.l) / iw) * (meses.length - 1))));
     cruz.setAttribute("x1", x(i)); cruz.setAttribute("x2", x(i)); cruz.setAttribute("visibility", "visible");
-    series.forEach((c, j) => {
+    canales.forEach((c, j) => {
       const v = val(meses[i], c);
       if (v === null) { puntos[j].setAttribute("visibility", "hidden"); return; }
       puntos[j].setAttribute("cx", x(i)); puntos[j].setAttribute("cy", y(v)); puntos[j].setAttribute("visibility", "visible");
     });
-    mostrarTooltip(e, etiquetaMesLarga(meses[i]), series.map((c) => {
-      const v = val(meses[i], c);
-      return [css(`--${c}`), c === "online" ? "Online" : "Offline", v === null ? "sin ventas" : fPesos.format(v)];
-    }));
+    mostrarTooltip(e, `${etiquetaMesLarga(meses[i])} · ${etiquetaIva()}`,
+      canales.map((c) => [colorCanal(c), nombreCanal(c), val(meses[i], c) === null ? "sin ventas" : pesos(val(meses[i], c))]));
   });
   capa.addEventListener("pointerleave", () => {
     ocultarTooltip();
@@ -400,74 +383,64 @@ function graficoTicket(r) {
 }
 
 // ---------------------------------------------------------------------
-// Respuestas y justificación
+// Respuestas y justificación (valores leídos del mart, sin cálculos)
 // ---------------------------------------------------------------------
 function descripcionFiltros() {
-  const partes = [];
-  partes.push(F.desde === MESES[0] && F.hasta === MESES[MESES.length - 1]
-    ? "ene 2024 a sep 2025"
-    : F.desde === F.hasta ? etiquetaMesLarga(F.desde) : `${etiquetaMesLarga(F.desde)} a ${etiquetaMesLarga(F.hasta)}`);
-  if (F.canal !== "todos") partes.push(F.canal === "online" ? "solo online" : "solo offline");
-  if (F.prov !== "todas") partes.push(F.prov);
+  const partes = [F.mes ? etiquetaMesLarga(F.mes) : F.anio === "Todo" ? "ene 2024 a sep 2025" : `año ${F.anio}`];
+  if (F.canal !== "Todos") partes.push(F.canal === "ONLINE" ? "solo online" : "solo offline");
+  if (F.prov !== "Todas") partes.push(F.prov);
+  partes.push(etiquetaIva());
   return partes.join(" · ");
 }
 
-function respuestas(r) {
+function respuestas() {
+  const per = periodo();
+  const r = fila(per);
   const filtros = descripcionFiltros();
-  const incluidos = ESTADOS.filter((e) => DIM_ESTADO[e].esVenta);
-  const excluidos = ESTADOS.filter((e) => !DIM_ESTADO[e].esVenta && r.porEstado[e].pedidos > 0);
-  const centFuera = excluidos.reduce((s, e) => s + r.porEstado[e].cent, 0);
-  const pedFuera = excluidos.reduce((s, e) => s + r.porEstado[e].pedidos, 0);
+  const estados = ESTADO.get(clave(per, F.canal, F.prov)) ?? {};
+  const deVenta = ORDEN_ESTADOS.filter((e) => estados[e]?.esVenta);
+  const noVenta = ORDEN_ESTADOS.filter((e) => estados[e] && !estados[e].esVenta);
 
   // Pregunta 1
-  document.getElementById("k-ventas").textContent = pesos(r.cent);
+  document.getElementById("k-ventas").textContent = pesos(ventasDe(r));
   document.getElementById("k-ventas-det").textContent = filtros;
-  document.getElementById("j1").innerHTML =
-    `<code>SUM(fact_sales_order.sales_amount)</code> = <strong>${pesos(r.cent)}</strong>. ` +
-    `El DW ya dejó <code>sales_amount</code> = <code>total_amount</code> en las ventas válidas y 0 en el resto, así que el tablero solo suma. ` +
-    (pedFuera ? `Los ${fEntero.format(pedFuera)} pedidos que no son venta (${excluidos.join(", ")}, ${pesos(centFuera)}) suman 0.` : "");
+  document.getElementById("j1").innerHTML = r
+    ? `Fila de <code>mart_sales_kpi</code> para estos filtros: <strong>${pesos(r.ventas)}</strong> con IVA ` +
+      `(<code>sales_amount</code>) y <strong>${pesos(r.ventasSinIva)}</strong> sin IVA (<code>sales_net_amount</code>). ` +
+      `De la venta con IVA, ${pesos(r.iva)} son IVA y ${pesos(r.envio)} envío. ` +
+      `Quedaron afuera ${fEntero.format(r.pedidosNoVenta)} pedidos que no son venta (${noVenta.join(", ") || "ninguno"}), por ${pesos(r.montoNoVenta ?? 0)}.`
+    : "No hay pedidos con estos filtros.";
 
   // Pregunta 2
-  document.getElementById("k-pedidos").textContent = fEntero.format(r.pedidos);
-  document.getElementById("k-pedidos-det").textContent = r.totalBase
-    ? `${fPct.format(r.pedidos / r.totalBase)} de los ${fEntero.format(r.totalBase)} pedidos del período`
+  document.getElementById("k-pedidos").textContent = r ? fEntero.format(r.pedidosVenta) : "—";
+  document.getElementById("k-pedidos-det").textContent = r
+    ? `${fPct.format(r.proporcionVenta)} de los ${fEntero.format(r.pedidosTotal)} pedidos del período`
     : "Sin pedidos con estos filtros";
-  const sumandos = incluidos.map((e) => `${e} (${fEntero.format(r.porEstado[e].pedidos)})`);
-  document.getElementById("j2").innerHTML =
-    `Pedidos de <code>fact_sales_order</code> con <code>is_sale = true</code>: ${sumandos.join(" + ")} = <strong>${fEntero.format(r.pedidos)}</strong>. ` +
-    `La regla "venta = PAID o FULFILLED" vive en <code>dim_order_status.is_sale</code> y el DW la copió al hecho.`;
+  document.getElementById("j2").innerHTML = r
+    ? `<code>sale_orders</code> = <strong>${fEntero.format(r.pedidosVenta)}</strong>: los pedidos cuyo estado tiene <code>is_sale = true</code> en <code>dim_order_status</code> (solo PAID y FULFILLED). ` +
+      `En este período: ${deVenta.map((e) => `${e} ${fEntero.format(estados[e].pedidos)}`).join(", ")}. El detalle por estado sale de <code>mart_order_status</code>.`
+    : "No hay pedidos con estos filtros.";
 
-  // Pregunta 3
-  const t = (c) => (c.pedidos ? c.cent / c.pedidos : null);
-  const tOn = t(r.canal.online), tOff = t(r.canal.offline);
-  const mostrar = (id, idCaja, v, visible) => {
-    document.getElementById(id).textContent = visible && v !== null ? fPesos.format(v / 100) : "—";
-    document.getElementById(idCaja).classList.toggle("apagado", !visible);
-  };
-  mostrar("k-ticket-on", "k-on", tOn, F.canal !== "offline");
-  mostrar("k-ticket-off", "k-off", tOff, F.canal !== "online");
+  // Pregunta 3: una fila del mart por canal
+  const rOn = fila(per, "ONLINE"), rOff = fila(per, "OFFLINE");
+  const verOn = F.canal !== "OFFLINE", verOff = F.canal !== "ONLINE";
+  document.getElementById("k-ticket-on").textContent = verOn ? pesos(ticketDe(rOn)) : "—";
+  document.getElementById("k-ticket-off").textContent = verOff ? pesos(ticketDe(rOff)) : "—";
+  document.getElementById("k-on").classList.toggle("apagado", !verOn);
+  document.getElementById("k-off").classList.toggle("apagado", !verOff);
+  document.getElementById("k-ticket-det").textContent = filtros;
 
-  let det = "", j3 = "";
-  const linea = (nombre, c) => `${nombre}: ${pesos(c.cent)} ÷ ${fEntero.format(c.pedidos)} = <strong>${fPesos.format(c.cent / c.pedidos / 100)}</strong>`;
-  if (tOn !== null && tOff !== null) {
-    const dif = tOn / tOff - 1;
-    det = `Online ${dif >= 0 ? "+" : ""}${fPct.format(dif)} frente a offline`;
-    j3 = `${linea("Online", r.canal.online)}. ${linea("Offline", r.canal.offline)}. `;
-    const sOn = (r.canal.online.cent - r.canal.online.envio) / r.canal.online.pedidos;
-    const sOff = (r.canal.offline.cent - r.canal.offline.envio) / r.canal.offline.pedidos;
-    const explica = Math.abs(sOn - sOff) < Math.abs(tOn - tOff) * 0.25;
-    j3 += `Sin el envío (<code>shipping_fee</code>, que solo pagan los pedidos online) quedan en ${fPesos.format(sOn / 100)} online y ${fPesos.format(sOff / 100)} offline` +
-      (explica ? ": la diferencia es casi toda el envío." : ": el envío explica solo una parte de la diferencia.");
-  } else if (tOn !== null) {
-    j3 = `${linea("Online", r.canal.online)}.`;
-  } else if (tOff !== null) {
-    j3 = `${linea("Offline", r.canal.offline)}.`;
-  } else {
-    j3 = "No hay ventas con estos filtros.";
+  const linea = (nombre, x) => x && x.pedidosVenta
+    ? `${nombre}: <strong>${pesos(ticketDe(x))}</strong> (<code>${F.iva === "con" ? "ticket_amount" : "ticket_net_amount"}</code>, ${fEntero.format(x.pedidosVenta)} pedidos)`
+    : `${nombre}: sin ventas`;
+  const partes = [];
+  if (verOn) partes.push(linea("Online", rOn));
+  if (verOff) partes.push(linea("Offline", rOff));
+  let j3 = partes.join(". ") + ".";
+  if (verOn && verOff && rOn?.pedidosVenta && rOff?.pedidosVenta) {
+    j3 += ` Sin el envío, que solo pagan los pedidos online (<code>ticket_no_shipping</code>, con IVA): ${pesos(rOn.ticketSinEnvio)} online y ${pesos(rOff.ticketSinEnvio)} offline.`;
   }
-  document.getElementById("k-ticket-det").textContent = det || filtros;
   document.getElementById("j3").innerHTML = j3;
-
 }
 
 // ---------------------------------------------------------------------
@@ -476,47 +449,37 @@ function respuestas(r) {
 function marcarSegmentado(id, valor) {
   document.querySelectorAll(`#${id} button`).forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.valor === valor)));
 }
-function sincronizarControles() {
-  const primero = MESES[0], ultimo = MESES[MESES.length - 1];
-  const anio = F.desde === primero && F.hasta === ultimo ? "todo"
-    : F.desde === `${F.desde.slice(0, 4)}-01` && F.hasta === (F.desde.slice(0, 4) === ultimo.slice(0, 4) ? ultimo : `${F.desde.slice(0, 4)}-12`) && F.desde.slice(0, 4) === F.hasta.slice(0, 4)
-      ? F.desde.slice(0, 4) : null;
-  marcarSegmentado("f-anio", anio);
-  marcarSegmentado("f-canal", F.canal);
-  document.getElementById("f-desde").value = F.desde;
-  document.getElementById("f-hasta").value = F.hasta;
-  document.getElementById("f-prov").value = F.prov;
+function opcionesMes() {
+  const sel = document.getElementById("f-mes");
+  const meses = F.anio === "Todo" ? MESES : MESES.filter((m) => m.startsWith(F.anio));
+  sel.replaceChildren(new Option(F.anio === "Todo" ? "Todos los meses" : `Todo ${F.anio}`, ""));
+  for (const k of meses) sel.add(new Option(etiquetaMesLarga(k), k));
+  sel.value = F.mes;
 }
-function alternarMes(k) {
-  if (F.desde === k && F.hasta === k && F.rangoPrevio) {
-    [F.desde, F.hasta] = F.rangoPrevio;
-    F.rangoPrevio = null;
-  } else {
-    if (!F.rangoPrevio) F.rangoPrevio = [F.desde, F.hasta];
-    F.desde = F.hasta = k;
-  }
-  render();
+function sincronizarControles() {
+  marcarSegmentado("f-anio", F.anio === "Todo" ? "todo" : F.anio);
+  marcarSegmentado("f-canal", F.canal === "Todos" ? "todos" : F.canal.toLowerCase());
+  marcarSegmentado("f-iva", F.iva);
+  opcionesMes();
+  document.getElementById("f-prov").value = F.prov;
 }
 
 function armarFiltros() {
-  const desde = document.getElementById("f-desde"), hasta = document.getElementById("f-hasta");
-  for (const k of MESES) {
-    desde.add(new Option(etiquetaMesLarga(k), k));
-    hasta.add(new Option(etiquetaMesLarga(k), k));
-  }
   const prov = document.getElementById("f-prov");
+  prov.replaceChildren(new Option("Todas", "Todas"));
   for (const p of PROVINCIAS) prov.add(new Option(p, p));
 
   document.querySelectorAll("#f-anio button").forEach((b) => b.addEventListener("click", () => {
-    const v = b.dataset.valor;
-    F.rangoPrevio = null;
-    if (v === "todo") { F.desde = MESES[0]; F.hasta = MESES[MESES.length - 1]; }
-    else { const del = MESES.filter((m) => m.startsWith(v)); F.desde = del[0]; F.hasta = del[del.length - 1]; }
+    F.anio = b.dataset.valor === "todo" ? "Todo" : b.dataset.valor;
+    F.mes = "";
     render();
   }));
-  document.querySelectorAll("#f-canal button").forEach((b) => b.addEventListener("click", () => { F.canal = b.dataset.valor; render(); }));
-  desde.addEventListener("change", () => { F.desde = desde.value; if (F.hasta < F.desde) F.hasta = F.desde; F.rangoPrevio = null; render(); });
-  hasta.addEventListener("change", () => { F.hasta = hasta.value; if (F.desde > F.hasta) F.desde = F.hasta; F.rangoPrevio = null; render(); });
+  document.getElementById("f-mes").addEventListener("change", (e) => { F.mes = e.target.value; render(); });
+  document.querySelectorAll("#f-canal button").forEach((b) => b.addEventListener("click", () => {
+    F.canal = b.dataset.valor === "todos" ? "Todos" : b.dataset.valor.toUpperCase();
+    render();
+  }));
+  document.querySelectorAll("#f-iva button").forEach((b) => b.addEventListener("click", () => { F.iva = b.dataset.valor; render(); }));
   prov.addEventListener("change", () => { F.prov = prov.value; render(); });
   document.getElementById("f-reset").addEventListener("click", () => { F = estadoInicial(); render(); });
 }
@@ -526,11 +489,10 @@ function armarFiltros() {
 // ---------------------------------------------------------------------
 function render() {
   sincronizarControles();
-  const r = calcular();
-  respuestas(r);
-  graficoMeses(r);
-  graficoEstados(r);
-  graficoTicket(r);
+  respuestas();
+  graficoMeses();
+  graficoEstados();
+  graficoTicket();
 }
 
 async function iniciar() {
@@ -541,13 +503,12 @@ async function iniciar() {
       if (!resp.ok) throw new Error(`${archivo}: HTTP ${resp.status}`);
       return parsearCSV(await resp.text());
     };
-    const archivos = ["fact_sales_order.csv", "dim_date.csv", "dim_channel.csv", "dim_province.csv", "dim_order_status.csv"];
-    const [hecho, fecha, canal, provincia, estadoPedido] = await Promise.all(archivos.map(leer));
-    preparar({ hecho, fecha, canal, provincia, estado: estadoPedido });
+    const [kpi, estados] = await Promise.all(["mart_sales_kpi.csv", "mart_order_status.csv"].map(leer));
+    preparar(kpi, estados);
     F = estadoInicial();
     armarFiltros();
     render();
-    estado.textContent = `Calculado en vivo sobre ${fEntero.format(PEDIDOS.length)} pedidos de fact_sales_order (modelo estrella del DW)`;
+    estado.textContent = "KPIs leídos de las tablas mart del data warehouse (mart_sales_kpi y mart_order_status)";
     estado.classList.add("ok");
 
     let espera;

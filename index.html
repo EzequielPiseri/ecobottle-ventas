@@ -13,7 +13,7 @@
     <div class="wrap">
       <p class="eyebrow">EcoBottle AR · Tablero de ventas</p>
       <h1>Ventas en 3 preguntas</h1>
-      <p class="lede">¿Cuánto vendimos? ¿Cuántos pedidos cuentan como venta? ¿Cuál fue el ticket promedio online y offline? Los datos vienen del data warehouse (modelo estrella): cambiá los filtros y los números se recalculan.</p>
+      <p class="lede">¿Cuánto vendimos? ¿Cuántos pedidos cuentan como venta? ¿Cuál fue el ticket promedio online y offline? Los KPIs vienen ya calculados en SQL, en las tablas mart del data warehouse: el tablero solo muestra la fila que corresponde a los filtros.</p>
       <p id="estado" class="estado">Cargando datos…</p>
     </div>
   </header>
@@ -28,13 +28,8 @@
           <button type="button" data-valor="2024" aria-pressed="false">2024</button>
           <button type="button" data-valor="2025" aria-pressed="false">2025</button>
         </div>
-        <label class="rango">
-          <span class="sr">Desde</span><select id="f-desde" aria-label="Desde"></select>
-        </label>
-        <span class="guion">a</span>
-        <label class="rango">
-          <span class="sr">Hasta</span><select id="f-hasta" aria-label="Hasta"></select>
-        </label>
+        <label for="f-mes" class="sr">Mes</label>
+        <select id="f-mes"><option value="">Todos los meses</option></select>
       </div>
       <div class="filtro">
         <span class="etq-filtro">Canal</span>
@@ -47,6 +42,13 @@
       <div class="filtro">
         <label for="f-prov" class="etq-filtro">Provincia</label>
         <select id="f-prov"><option value="todas">Todas</option></select>
+      </div>
+      <div class="filtro">
+        <span class="etq-filtro">Monto</span>
+        <div class="segmentado" id="f-iva" role="group" aria-label="Impuestos">
+          <button type="button" data-valor="con" aria-pressed="true">Con IVA</button>
+          <button type="button" data-valor="sin" aria-pressed="false">Sin IVA</button>
+        </div>
       </div>
       <button type="button" id="f-reset" class="boton-sec">Restablecer</button>
     </section>
@@ -88,7 +90,7 @@
             <li><i class="clave offline"></i>Offline</li>
           </ul>
         </header>
-        <p class="ayuda">Ventas por mes, apiladas por canal. Hacé clic en un mes para filtrar el tablero; otro clic lo quita.</p>
+        <p class="ayuda">Ventas por mes, apiladas por canal. Hacé clic en un mes para ver solo ese mes; otro clic vuelve al período.</p>
         <div class="grafico" id="g-meses"></div>
         <details class="tabla-datos">
           <summary>Ver los datos en tabla</summary>
@@ -116,7 +118,7 @@
             <li><i class="clave linea offline"></i>Offline</li>
           </ul>
         </header>
-        <p class="ayuda">Ventas ÷ pedidos válidos de cada canal, por mes. Pasá el mouse para ver los valores.</p>
+        <p class="ayuda">Ticket de cada canal y mes, calculado en SQL (<code>ticket_amount</code>). Pasá el mouse para ver los valores.</p>
         <div class="grafico" id="g-ticket"></div>
       </article>
 
@@ -127,14 +129,14 @@
           <div><h3><span class="num">2</span>Pedidos</h3><p id="j2"></p></div>
           <div><h3><span class="num">3</span>Ticket</h3><p id="j3"></p></div>
         </div>
-        <p class="reglas"><strong>De dónde salen los datos:</strong> del modelo estrella del data warehouse del TP (<code>dw/</code>): el hecho <code>fact_sales_order</code> (un pedido por fila) y las dimensiones <code>dim_date</code>, <code>dim_channel</code>, <code>dim_province</code> y <code>dim_order_status</code>. Las transformaciones y la regla de negocio se hicieron en SQL al construir el DW (la regla de venta está en <code>dim_order_status.is_sale</code>). El tablero no transforma: filtra por dimensiones y suma medidas.</p>
+        <p class="reglas"><strong>De dónde salen los datos:</strong> de las tablas <strong>mart</strong> del data warehouse del TP (<code>sql/05_marts.sql</code>): <code>mart_sales_kpi</code> trae, para cada combinación de período (total, año o mes), canal y provincia, las ventas con y sin IVA, los pedidos válidos y el ticket promedio, ya calculados en SQL con <code>GROUPING SETS</code>; <code>mart_order_status</code> trae los pedidos por estado. El tablero no suma, no promedia ni divide: busca la fila de los filtros elegidos y la muestra. Venta = pedido con <code>is_sale = true</code> (<code>PAID</code> o <code>FULFILLED</code>); sin IVA = <code>total_amount − tax_amount</code>.</p>
       </article>
     </section>
 
   </main>
 
   <footer class="wrap pie">
-    <p>Datos: <code>fact_sales_order</code>, <code>dim_date</code>, <code>dim_channel</code>, <code>dim_province</code> y <code>dim_order_status</code>, exportados por el data warehouse del TP (11.969 pedidos, enero 2024 a septiembre 2025). Cálculo en <code>app.js</code>.</p>
+    <p>Datos: <code>mart_sales_kpi</code> y <code>mart_order_status</code>, generadas por <code>sql/05_marts.sql</code> a partir del modelo estrella del TP (11.969 pedidos, enero 2024 a septiembre 2025).</p>
   </footer>
 
   <div id="tooltip" class="tooltip" role="status" hidden></div>
