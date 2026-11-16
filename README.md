@@ -71,7 +71,7 @@ Para actualizar los datos: en el TP, correr `python run_sql.py` y copiar `dw/mar
 
 ## Ver en local
 
-Abrir `index.html` con doble clic no funciona, porque el navegador bloquea la lectura de los CSV. Usar un servidor local, por ejemplo 2:
+Abrir `index.html` con doble clic no funciona, porque el navegador bloquea la lectura de los CSV. Usar un servidor local, por ejemplo 3:
 
 ```bash
 python -m http.server 8000
